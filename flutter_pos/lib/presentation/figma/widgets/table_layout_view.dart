@@ -19,6 +19,7 @@ class TableLayoutView extends StatelessWidget {
     required this.onOpenOrder,
     required this.onReprintOrder,
     required this.onAssignDeliveryDriver,
+    this.onLogout,
   });
 
   final List<TableInfo> tables;
@@ -29,6 +30,7 @@ class TableLayoutView extends StatelessWidget {
   final Future<void> Function(AppOrder order) onReprintOrder;
   final Future<void> Function(String orderId, String? driver)
       onAssignDeliveryDriver;
+  final VoidCallback? onLogout;
 
   Color _statusColor(TableStatus status) {
     switch (status) {
@@ -62,6 +64,7 @@ class TableLayoutView extends StatelessWidget {
       onOpenOrder: onOpenOrder,
       onReprintOrder: onReprintOrder,
       onAssignDeliveryDriver: onAssignDeliveryDriver,
+      onLogout: onLogout,
       statusColor: _statusColor,
       statusText: _statusText,
     );
@@ -77,6 +80,7 @@ class _TableLayoutContent extends StatefulWidget {
     required this.onOpenOrder,
     required this.onReprintOrder,
     required this.onAssignDeliveryDriver,
+    required this.onLogout,
     required this.statusColor,
     required this.statusText,
   });
@@ -89,6 +93,7 @@ class _TableLayoutContent extends StatefulWidget {
   final Future<void> Function(AppOrder order) onReprintOrder;
   final Future<void> Function(String orderId, String? driver)
       onAssignDeliveryDriver;
+  final VoidCallback? onLogout;
   final Color Function(TableStatus) statusColor;
   final String Function(TableStatus) statusText;
 
@@ -211,6 +216,52 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
     final month = dateTime.month.toString().padLeft(2, '0');
     final year = dateTime.year;
     return '$day/$month/$year ${_formatTime(dateTime)}';
+  }
+
+  TableInfo? _tableByNumber(String number) {
+    try {
+      return widget.tables.firstWhere((table) => table.number == number);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Widget _buildFloorPlanCard(TableInfo table) {
+    return InkWell(
+      onTap: () => widget.onSelectTable(table.number),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: widget.statusColor(table.status),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x26000000), blurRadius: 8, offset: Offset(0, 2))
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(table.number,
+                style: const TextStyle(
+                    fontSize: 34,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white)),
+            const SizedBox(height: 6),
+            Text(widget.statusText(table.status),
+                style: const TextStyle(fontSize: 13, color: Color(0xFFE5E7EB))),
+            if ((table.orderTotal ?? 0) > 0) ...[
+              const SizedBox(height: 6),
+              Text('\$${table.orderTotal!.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                      fontSize: 16,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700)),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   double _orderTotal(AppOrder order) => orderGrandTotal(order);
@@ -381,6 +432,7 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
         if (!mounted) return;
         showPosSalesReportDialog(context);
       },
+      onLogout: widget.onLogout,
     );
   }
 
@@ -941,66 +993,64 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final width = constraints.maxWidth;
-              final crossAxisCount = width > 1200
-                  ? 5
-                  : width > 900
-                      ? 4
-                      : width > 650
-                          ? 3
-                          : 2;
               const spacing = 14.0;
-              const childAspectRatio = 186 / 146;
+              const normalWidth = 186.0;
+              const normalHeight = 146.0;
+              final topTables = ['5', '6', '7', '8', '9']
+                  .map(_tableByNumber)
+                  .whereType<TableInfo>()
+                  .toList(growable: false);
+              final bottomTables = ['3 y 4', '1 y 2']
+                  .map(_tableByNumber)
+                  .whereType<TableInfo>()
+                  .toList(growable: false);
 
-              return GridView.builder(
-                itemCount: widget.tables.length,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  crossAxisSpacing: spacing,
-                  mainAxisSpacing: spacing,
-                  childAspectRatio: childAspectRatio,
-                ),
-                itemBuilder: (context, index) {
-                  final table = widget.tables[index];
-                  return InkWell(
-                    onTap: () => widget.onSelectTable(table.number),
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: widget.statusColor(table.status),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: const [
-                          BoxShadow(
-                              color: Color(0x26000000),
-                              blurRadius: 8,
-                              offset: Offset(0, 2))
-                        ],
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(table.number,
-                              style: const TextStyle(
-                                  fontSize: 34,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white)),
-                          const SizedBox(height: 6),
-                          Text(widget.statusText(table.status),
-                              style: const TextStyle(
-                                  fontSize: 13, color: Color(0xFFE5E7EB))),
-                          if ((table.orderTotal ?? 0) > 0) ...[
-                            const SizedBox(height: 6),
-                            Text('\$${table.orderTotal!.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700)),
-                          ],
-                        ],
-                      ),
+              final maxWidth = constraints.maxWidth;
+              final minRequiredTopWidth =
+                  (normalWidth * 5) + (spacing * 4); // 5 cards + gaps
+              final scale = (maxWidth / minRequiredTopWidth).clamp(0.55, 1.0);
+              final itemWidth = normalWidth * scale;
+              final itemHeight = normalHeight * scale;
+              final doubleCardWidth = (itemWidth * 2) + spacing;
+
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: topTables
+                          .map(
+                            (table) => Padding(
+                              padding: EdgeInsets.only(
+                                  right: table == topTables.last ? 0 : spacing),
+                              child: SizedBox(
+                                width: itemWidth,
+                                height: itemHeight,
+                                child: _buildFloorPlanCard(table),
+                              ),
+                            ),
+                          )
+                          .toList(growable: false),
                     ),
-                  );
-                },
+                    SizedBox(height: spacing),
+                    Row(
+                      children: bottomTables
+                      .map(
+                        (table) => Padding(
+                          padding: EdgeInsets.only(
+                            right: table == bottomTables.last ? 0 : spacing,
+                            ),
+                            child: SizedBox(
+                              width: doubleCardWidth,
+                              height: itemHeight,
+                              child: _buildFloorPlanCard(table),
+                              ),
+                              ),
+                              )
+                              .toList(growable: false),
+                              ),
+                  ],
+                ),
               );
             },
           ),

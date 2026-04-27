@@ -1,18 +1,23 @@
 import 'package:flutter/foundation.dart';
 
 class AppConfig {
+  static const String _hostgatorBaseUrl =
+      'https://ronspizza.net/ronspizzapos/backend/public';
+
   static String get apiBaseUrl {
     const override = String.fromEnvironment('API_BASE_URL');
     if (override.isNotEmpty) {
       return override;
     }
 
+    // Default deployment target is HostGator.
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2/ronspizzapos/backend/public';
+      return _hostgatorBaseUrl;
     }
 
-    return 'http://localhost/ronspizzapos/backend/public';
+    return _hostgatorBaseUrl;
   }
+
   static const String apiVersion = '/api/v1';
 
   static String get apiUrl => '$apiBaseUrl$apiVersion';

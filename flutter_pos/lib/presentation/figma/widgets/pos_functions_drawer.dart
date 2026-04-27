@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 Future<void> showPosFunctionsDrawer(
   BuildContext context, {
   VoidCallback? onCreateReport,
+  VoidCallback? onLogout,
 }) async {
   await showGeneralDialog<void>(
     context: context,
@@ -20,7 +21,10 @@ Future<void> showPosFunctionsDrawer(
             child: SizedBox(
               width: 360,
               height: double.infinity,
-              child: _PosFunctionsPanel(onCreateReport: onCreateReport),
+              child: _PosFunctionsPanel(
+                onCreateReport: onCreateReport,
+                onLogout: onLogout,
+              ),
             ),
           ),
         ),
@@ -37,9 +41,10 @@ Future<void> showPosFunctionsDrawer(
 }
 
 class _PosFunctionsPanel extends StatelessWidget {
-  const _PosFunctionsPanel({this.onCreateReport});
+  const _PosFunctionsPanel({this.onCreateReport, this.onLogout});
 
   final VoidCallback? onCreateReport;
+  final VoidCallback? onLogout;
 
   @override
   Widget build(BuildContext context) {
@@ -108,18 +113,12 @@ class _PosFunctionsPanel extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: [
-              item(icon: Icons.key, label: 'Cerrar turno de caja'),
-              item(icon: Icons.add_circle_outline, label: 'Añadir transacción'),
-              item(icon: Icons.timer_outlined, label: 'Cerrar turno'),
-              item(icon: Icons.devices_outlined, label: 'Dispositivos'),
-              item(icon: Icons.point_of_sale_outlined, label: 'Abrir caja registradora'),
               item(
                 icon: Icons.assessment_outlined,
                 label: 'Crear reporte',
                 onTap: onCreateReport,
               ),
-              item(icon: Icons.refresh_outlined, label: 'Borrar caché'),
-              item(icon: Icons.logout, label: 'Cerrar sesión'),
+              item(icon: Icons.logout, label: 'Cerrar sesión', onTap: onLogout),
             ],
           ),
         ),

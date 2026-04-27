@@ -163,6 +163,19 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     });
   }
 
+  void _handleLogout() {
+    _draftSyncTimer?.cancel();
+    setState(() {
+      _session.clear();
+      _authError = null;
+      _isAuthenticating = false;
+      _isLoadingRemoteOrders = false;
+      _isSyncingPayment = false;
+      _currentView = PosView.tables;
+      _activeOrderId = null;
+    });
+  }
+
   void _handleOrderChanged(AppOrder order) {
     setState(() {
       _upsertOrder(order);
@@ -1381,6 +1394,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           onOpenOrder: _openOrderById,
           onReprintOrder: _handleReprintCompletedOrder,
           onAssignDeliveryDriver: _handleAssignDeliveryDriver,
+          onLogout: _handleLogout,
         );
       case PosView.pos:
         if (_activeOrder == null) {
@@ -1394,6 +1408,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           onOrderChanged: _handleOrderChanged,
           onSaveCustomer: _saveCustomerFromPos,
           onProceedToPayment: _handleProceedToPayment,
+          onLogout: _handleLogout,
         );
       case PosView.payment:
         if (_activeOrder == null) {
