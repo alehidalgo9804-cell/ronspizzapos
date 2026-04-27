@@ -1,0 +1,83 @@
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE TABLE IF NOT EXISTS sucursales (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(120) NOT NULL,
+  clave VARCHAR(40) NOT NULL,
+  telefono VARCHAR(30) NULL,
+  email VARCHAR(120) NULL,
+  direccion_linea_1 VARCHAR(200) NULL,
+  direccion_linea_2 VARCHAR(200) NULL,
+  ciudad VARCHAR(120) NULL,
+  estado VARCHAR(120) NULL,
+  codigo_postal VARCHAR(20) NULL,
+  lat DECIMAL(10,7) NULL,
+  lng DECIMAL(10,7) NULL,
+  activa TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_sucursales_clave (clave)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS roles (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(50) NOT NULL,
+  descripcion VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_roles_nombre (nombre)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS usuarios (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(120) NOT NULL,
+  apellido VARCHAR(120) NULL,
+  telefono VARCHAR(30) NULL,
+  email VARCHAR(120) NULL,
+  pin VARCHAR(20) NOT NULL,
+  password_hash VARCHAR(255) NULL,
+  rol_id BIGINT UNSIGNED NOT NULL,
+  sucursal_id BIGINT UNSIGNED NOT NULL,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  ultimo_login_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL,
+  UNIQUE KEY uq_usuarios_email (email),
+  KEY idx_usuarios_rol_id (rol_id),
+  KEY idx_usuarios_sucursal_id (sucursal_id),
+  KEY idx_usuarios_pin (pin),
+  CONSTRAINT fk_usuarios_roles FOREIGN KEY (rol_id) REFERENCES roles(id),
+  CONSTRAINT fk_usuarios_sucursales FOREIGN KEY (sucursal_id) REFERENCES sucursales(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS configuraciones_sucursal (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  sucursal_id BIGINT UNSIGNED NOT NULL,
+  clave VARCHAR(120) NOT NULL,
+  valor TEXT NULL,
+  tipo VARCHAR(40) NOT NULL DEFAULT 'string',
+  descripcion VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_configuracion_sucursal_clave (sucursal_id, clave),
+  KEY idx_configuraciones_sucursal_id (sucursal_id),
+  CONSTRAINT fk_configuracion_sucursal FOREIGN KEY (sucursal_id) REFERENCES sucursales(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS mesas (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  sucursal_id BIGINT UNSIGNED NOT NULL,
+  numero INT NOT NULL,
+  nombre VARCHAR(100) NULL,
+  zona VARCHAR(100) NULL,
+  capacidad INT NOT NULL DEFAULT 4,
+  estado VARCHAR(30) NOT NULL DEFAULT 'libre',
+  activa TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_mesa_numero (sucursal_id, numero),
+  KEY idx_mesas_sucursal_id (sucursal_id),
+  CONSTRAINT fk_mesas_sucursal FOREIGN KEY (sucursal_id) REFERENCES sucursales(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,0 +1,9 @@
+RewriteEngine On
+
+# Si existe archivo/directorio, servirlo normalmente
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Cualquier otra ruta de backoffice cae al SPA
+RewriteRule ^ index.html [L]

@@ -1,0 +1,68 @@
+CREATE TABLE IF NOT EXISTS repartidores (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(120) NOT NULL,
+  apellidos VARCHAR(120) NULL,
+  telefono VARCHAR(30) NOT NULL,
+  pin VARCHAR(20) NOT NULL,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  tipo_pago VARCHAR(40) NOT NULL DEFAULT 'mixto',
+  notas TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL,
+  UNIQUE KEY uq_repartidores_telefono (telefono),
+  KEY idx_repartidores_pin (pin)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS repartidor_sucursal (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  repartidor_id BIGINT UNSIGNED NOT NULL,
+  sucursal_id BIGINT UNSIGNED NOT NULL,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_repartidor_sucursal (repartidor_id, sucursal_id),
+  CONSTRAINT fk_repartidor_sucursal_repartidor FOREIGN KEY (repartidor_id) REFERENCES repartidores(id) ON DELETE CASCADE,
+  CONSTRAINT fk_repartidor_sucursal_sucursal FOREIGN KEY (sucursal_id) REFERENCES sucursales(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS repartidor_notas_direccion (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  repartidor_id BIGINT UNSIGNED NOT NULL,
+  direccion_cliente_id BIGINT UNSIGNED NOT NULL,
+  nota TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_repartidor_nota_repartidor (repartidor_id),
+  KEY idx_repartidor_nota_direccion (direccion_cliente_id),
+  CONSTRAINT fk_repartidor_nota_repartidor FOREIGN KEY (repartidor_id) REFERENCES repartidores(id) ON DELETE CASCADE,
+  CONSTRAINT fk_repartidor_nota_direccion FOREIGN KEY (direccion_cliente_id) REFERENCES direcciones_cliente(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS zonas_entrega (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  sucursal_id BIGINT UNSIGNED NOT NULL,
+  nombre VARCHAR(120) NOT NULL,
+  descripcion VARCHAR(255) NULL,
+  distancia_min_km DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+  distancia_max_km DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+  tarifa_envio DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  activa TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_zonas_entrega_sucursal FOREIGN KEY (sucursal_id) REFERENCES sucursales(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tarifas_envio (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  sucursal_id BIGINT UNSIGNED NOT NULL,
+  tipo_calculo VARCHAR(40) NOT NULL DEFAULT 'distancia',
+  distancia_min_km DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+  distancia_max_km DECIMAL(8,2) NOT NULL DEFAULT 0.00,
+  tarifa DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  prioridad INT NOT NULL DEFAULT 1,
+  activa TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_tarifas_envio_sucursal FOREIGN KEY (sucursal_id) REFERENCES sucursales(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

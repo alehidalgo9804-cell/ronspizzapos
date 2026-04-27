@@ -1,0 +1,138 @@
+CREATE TABLE IF NOT EXISTS empleados (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(120) NOT NULL,
+  apellidos VARCHAR(120) NULL,
+  telefono VARCHAR(30) NULL,
+  numero_empleado VARCHAR(30) NULL,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL,
+  UNIQUE KEY uq_empleados_numero (numero_empleado)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS descuentos (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(120) NOT NULL,
+  tipo_descuento VARCHAR(30) NOT NULL,
+  valor DECIMAL(12,2) NOT NULL,
+  requiere_autorizacion TINYINT(1) NOT NULL DEFAULT 0,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pedido_descuentos (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  pedido_id BIGINT UNSIGNED NOT NULL,
+  descuento_id BIGINT UNSIGNED NOT NULL,
+  aplicado_por_usuario_id BIGINT UNSIGNED NOT NULL,
+  monto_aplicado DECIMAL(12,2) NOT NULL,
+  motivo VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_pedido_descuentos_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pedido_descuentos_descuento FOREIGN KEY (descuento_id) REFERENCES descuentos(id),
+  CONSTRAINT fk_pedido_descuentos_usuario FOREIGN KEY (aplicado_por_usuario_id) REFERENCES usuarios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS empleado_creditos (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  empleado_id BIGINT UNSIGNED NOT NULL,
+  pedido_id BIGINT UNSIGNED NOT NULL,
+  monto_total DECIMAL(12,2) NOT NULL,
+  saldo_actual DECIMAL(12,2) NOT NULL,
+  estado VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+  fecha_generacion DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  fecha_liquidacion DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_empleado_creditos_empleado FOREIGN KEY (empleado_id) REFERENCES empleados(id),
+  CONSTRAINT fk_empleado_creditos_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS empleado_credito_abonos (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  empleado_credito_id BIGINT UNSIGNED NOT NULL,
+  monto DECIMAL(12,2) NOT NULL,
+  metodo_pago_id BIGINT UNSIGNED NULL,
+  usuario_id BIGINT UNSIGNED NOT NULL,
+  observaciones TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_credito_abonos_credito FOREIGN KEY (empleado_credito_id) REFERENCES empleado_creditos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_credito_abonos_metodo_pago FOREIGN KEY (metodo_pago_id) REFERENCES metodos_pago(id) ON DELETE SET NULL,
+  CONSTRAINT fk_credito_abonos_usuario FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS promociones (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nombre VARCHAR(140) NOT NULL,
+  descripcion TEXT NULL,
+  tipo_promocion VARCHAR(40) NOT NULL,
+  valor DECIMAL(12,2) NOT NULL,
+  prioridad INT NOT NULL DEFAULT 1,
+  acumulable TINYINT(1) NOT NULL DEFAULT 0,
+  activa TINYINT(1) NOT NULL DEFAULT 1,
+  fecha_inicio DATE NOT NULL,
+  fecha_fin DATE NOT NULL,
+  hora_inicio TIME NULL,
+  hora_fin TIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS promocion_sucursal (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  promocion_id BIGINT UNSIGNED NOT NULL,
+  sucursal_id BIGINT UNSIGNED NOT NULL,
+  activa TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_promocion_sucursal (promocion_id, sucursal_id),
+  CONSTRAINT fk_promocion_sucursal_promocion FOREIGN KEY (promocion_id) REFERENCES promociones(id) ON DELETE CASCADE,
+  CONSTRAINT fk_promocion_sucursal_sucursal FOREIGN KEY (sucursal_id) REFERENCES sucursales(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS promocion_productos (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  promocion_id BIGINT UNSIGNED NOT NULL,
+  producto_id BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_promocion_producto (promocion_id, producto_id),
+  CONSTRAINT fk_promocion_productos_promocion FOREIGN KEY (promocion_id) REFERENCES promociones(id) ON DELETE CASCADE,
+  CONSTRAINT fk_promocion_productos_producto FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS promocion_categorias (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  promocion_id BIGINT UNSIGNED NOT NULL,
+  categoria_id BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_promocion_categoria (promocion_id, categoria_id),
+  CONSTRAINT fk_promocion_categorias_promocion FOREIGN KEY (promocion_id) REFERENCES promociones(id) ON DELETE CASCADE,
+  CONSTRAINT fk_promocion_categorias_categoria FOREIGN KEY (categoria_id) REFERENCES categorias_producto(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS promocion_reglas (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  promocion_id BIGINT UNSIGNED NOT NULL,
+  regla_tipo VARCHAR(60) NOT NULL,
+  regla_valor VARCHAR(255) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_promocion_reglas_promocion FOREIGN KEY (promocion_id) REFERENCES promociones(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pedido_promociones (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  pedido_id BIGINT UNSIGNED NOT NULL,
+  promocion_id BIGINT UNSIGNED NOT NULL,
+  monto_aplicado DECIMAL(12,2) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_pedido_promociones_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
+  CONSTRAINT fk_pedido_promociones_promocion FOREIGN KEY (promocion_id) REFERENCES promociones(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
