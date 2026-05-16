@@ -4,15 +4,13 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Repositories\AuditRepository;
 use App\Repositories\TicketRepository;
 use Exception;
 
 final class TicketService
 {
     public function __construct(
-        private readonly TicketRepository $tickets = new TicketRepository(),
-        private readonly AuditRepository $audit = new AuditRepository()
+        private readonly TicketRepository $tickets = new TicketRepository()
     ) {
     }
 
@@ -43,20 +41,7 @@ final class TicketService
             'impreso_por_usuario_id' => (int) $authUser['id'],
         ]);
 
-        $row = $this->tickets->find($id) ?? [];
-        $this->audit->create([
-            'usuario_id' => (int) $authUser['id'],
-            'sucursal_id' => (int) ($authUser['sucursal_id'] ?? 0),
-            'entidad' => 'ticket_impresiones',
-            'entidad_id' => $id,
-            'accion' => ((int) ($payload['es_reimpresion'] ?? 0) === 1) ? 'reprint' : 'print',
-            'payload_json' => json_encode([
-                'pedido_id' => (int) $payload['pedido_id'],
-                'tipo_ticket' => (string) $payload['tipo_ticket'],
-            ], JSON_UNESCAPED_UNICODE),
-        ]);
-
-        return $row;
+        return $this->tickets->find($id) ?? [];
     }
 
     public function reprints(int $limit = 200): array

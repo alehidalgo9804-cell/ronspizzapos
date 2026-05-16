@@ -9,6 +9,8 @@ use App\Core\Router;
 
 $basePath = dirname(__DIR__);
 
+date_default_timezone_set('America/Hermosillo');
+
 spl_autoload_register(static function (string $class) use ($basePath): void {
     $prefix = 'App\\';
     if (!str_starts_with($class, $prefix)) {

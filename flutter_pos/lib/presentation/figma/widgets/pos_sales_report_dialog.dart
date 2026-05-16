@@ -52,13 +52,9 @@ class _SalesPreview {
   final List<Map<String, dynamic>> byPaymentMethod;
   final double deliverySales;
   final double deliveryShipping;
-  /// Pedidos domicilio en el periodo (para bono fijo).
   final int deliveryDeliveryCount;
-  /// Bono \$10 por entrega; informativo, no se resta de lo cobrado en caja.
   final double deliveryBonusTotal;
-  /// Envío cobrado por repartidor + bono (referencia de liquidación).
   final double deliveryDriverShare;
-  /// Ventas domicilio registradas en caja (productos), sin envío.
   final double deliveryPizzeriaShare;
   final bool showProducts;
   final DateTime generatedAt;
@@ -117,7 +113,6 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
       }
     }
 
-    // Fallback: si empleados no esta disponible para este rol, usar meseros de recibos.
     if (options.isEmpty) {
       final response = await _session.apiClient.get('/reportes/recibos?page=1&per_page=1');
       if (response['success'] == true) {
@@ -267,7 +262,6 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
       dateOnly: false,
     );
 
-    // Fallback para compatibilidad de filtros entre POS y backend (formato/rango de fecha).
     if (_toInt(summary['total_pedidos']) == 0 && receiptsRows.isEmpty) {
       query = _buildQueryParams(
         from: _fromDateTime,
@@ -575,37 +569,43 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
                   const SizedBox(height: 12),
                   _fieldRow(
                     label: 'Empleado',
-                    child: DropdownButtonFormField<String>(
-                      value: _allCashiers
-                          ? 'all'
-                          : (_selectedCashierId == null ? 'all' : 'cashier_$_selectedCashierId'),
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        border: OutlineInputBorder(),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFD1D5DB)),
+                        borderRadius: BorderRadius.circular(4),
                       ),
-                      items: [
-                        const DropdownMenuItem<String>(
-                          value: 'all',
-                          child: Text('Todas las cajas'),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          isExpanded: true,
+                          value: _allCashiers
+                              ? 'all'
+                              : (_selectedCashierId == null ? 'all' : 'cashier_$_selectedCashierId'),
+                          items: [
+                            const DropdownMenuItem<String>(
+                              value: 'all',
+                              child: Text('Todas las cajas'),
+                            ),
+                            ..._cashiers.map(
+                              (cashier) => DropdownMenuItem<String>(
+                                value: 'cashier_${cashier.id}',
+                                child: Text(cashier.name),
+                              ),
+                            ),
+                          ],
+                          onChanged: _isLoadingCashiers
+                              ? null
+                              : (value) {
+                                  if (value == null) return;
+                                  setState(() {
+                                    _allCashiers = value == 'all';
+                                    if (!_allCashiers) {
+                                      _selectedCashierId = int.tryParse(value.replaceFirst('cashier_', ''));
+                                    }
+                                  });
+                                },
                         ),
-                        ..._cashiers.map(
-                          (cashier) => DropdownMenuItem<String>(
-                            value: 'cashier_${cashier.id}',
-                            child: Text(cashier.name),
-                          ),
-                        ),
-                      ],
-                      onChanged: _isLoadingCashiers
-                          ? null
-                          : (value) {
-                              if (value == null) return;
-                              setState(() {
-                                _allCashiers = value == 'all';
-                                if (!_allCashiers) {
-                                  _selectedCashierId = int.tryParse(value.replaceFirst('cashier_', ''));
-                                }
-                              });
-                            },
+                      ),
                     ),
                   ),
                   const SizedBox(height: 14),

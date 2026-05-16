@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Core\Env;
-use App\Repositories\SettingsRepository;
 use Exception;
 
 final class MapsService
@@ -13,9 +12,8 @@ final class MapsService
     private const AUTOCOMPLETE_ENDPOINT = 'https://maps.googleapis.com/maps/api/place/autocomplete/json';
     private const DETAILS_ENDPOINT = 'https://maps.googleapis.com/maps/api/place/details/json';
 
-    public function __construct(
-        private readonly SettingsRepository $settings = new SettingsRepository()
-    ) {
+    public function __construct()
+    {
     }
 
     public function isConfigured(): bool
@@ -142,23 +140,6 @@ final class MapsService
         $fromEnv = trim((string) Env::get('GOOGLE_MAPS_API_KEY', ''));
         if ($fromEnv !== '') {
             return [$fromEnv, 'env'];
-        }
-
-        $globalCandidates = [
-            'google.maps.api_key',
-            'integrations.google_maps.api_key',
-            'integrations.google_places.api_key',
-        ];
-
-        foreach ($globalCandidates as $key) {
-            $row = $this->settings->globalOne($key);
-            if (!is_array($row)) {
-                continue;
-            }
-            $value = trim((string) ($row['valor'] ?? ''));
-            if ($value !== '') {
-                return [$value, 'settings:' . $key];
-            }
         }
 
         return ['', null];
