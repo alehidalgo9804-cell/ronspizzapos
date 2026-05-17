@@ -3,13 +3,15 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../../core/platform/kitchen_printer.dart';
+import '../../core/platform/printer_manager.dart';
+import '../../core/platform/printer_models.dart';
 import '../../core/session/app_session.dart';
 import 'constants/labels.dart';
 import 'figma_mock_data.dart';
 import 'figma_models.dart';
 import 'widgets/payment_view.dart';
 import 'widgets/pos_pin_login_view.dart';
+import 'widgets/pos_printer_preview_dialog.dart';
 import 'widgets/pos_window_view.dart';
 import 'widgets/table_layout_view.dart';
 
@@ -37,10 +39,33 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
   String? _authError;
   Timer? _draftSyncTimer;
   bool _isLoadingRemoteOrders = false;
+  bool _isLoadingBranches = true;
+  List<Map<String, dynamic>> _branches = [];
 
   @override
   void initState() {
     super.initState();
+    _loadBranches();
+  }
+
+  Future<void> _loadBranches() async {
+    try {
+      final response = await _session.apiClient.get('/branches');
+      if (response['success'] == true) {
+        final data = response['data'];
+        if (data is List) {
+          setState(() {
+            _branches = data.map((e) => e is Map<String, dynamic> ? e : <String, dynamic>{}).toList();
+          });
+        }
+      }
+    } catch (_) {
+      // ignore
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingBranches = false);
+      }
+    }
   }
 
   @override
@@ -560,11 +585,11 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     throw Exception('Sesion no autenticada. Inicia sesion con PIN de caja.');
   }
 
-  Future<void> _authenticateWithPin(String pin) async {
+  Future<void> _authenticateWithPin(String pin, int branchId) async {
     final response =
         await _session.apiClient.post('/auth/login', <String, dynamic>{
       'pin': pin,
-      'sucursal_id': 1,
+      'sucursal_id': branchId,
       'plataforma': 'pos_flutter',
     });
 
@@ -578,7 +603,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     final token = '${data['token'] ?? ''}';
     final user =
         (data['user'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
-    final branchId = _toInt(user['sucursal_id'], fallback: 1);
+    final responseBranchId = _toInt(user['sucursal_id'], fallback: branchId);
     final userId = _toInt(user['id'], fallback: 1);
     final nombre = '${user['nombre'] ?? ''}'.trim();
     final apellido = '${user['apellido'] ?? ''}'.trim();
@@ -590,7 +615,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
 
     _session.setAuth(
       token: token,
-      branchId: branchId,
+      branchId: responseBranchId,
       userId: userId,
       userName: '$nombre $apellido'.trim(),
       role: role.isEmpty ? 'cajero' : role,
@@ -601,14 +626,14 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     await _loadOrdersFromBackend();
   }
 
-  Future<void> _handleLoginWithPin(String pin) async {
+  Future<void> _handleLoginWithPin(String pin, int branchId) async {
     if (_isAuthenticating) return;
     setState(() {
       _authError = null;
       _isAuthenticating = true;
     });
     try {
-      await _authenticateWithPin(pin);
+      await _authenticateWithPin(pin, branchId);
       if (!mounted) return;
       setState(() {
         _isAuthenticating = false;
@@ -1073,7 +1098,20 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
 
   Future<void> _printCustomerReceipt(String receiptText) async {
     try {
-      await KitchenPrinter.printCustomerReceipt(receiptText);
+      final printer = PrinterManager.instance.resolvePrinter(PrinterDestination.customerReceipt);
+      if (printer != null && printer.driver == PrinterDriver.pdf) {
+        if (!mounted) return;
+        await showPrinterPreviewDialog(
+          context,
+          title: 'Ticket cliente',
+          ticketText: receiptText,
+        );
+        return;
+      }
+      await PrinterManager.instance.printTicket(
+        destination: PrinterDestination.customerReceipt,
+        text: receiptText,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(PosLabels.ticket.customerReceiptSent)),
@@ -1378,8 +1416,9 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
   Widget build(BuildContext context) {
     if (!_session.isAuthenticated) {
       return PosPinLoginView(
-        isLoading: _isAuthenticating,
+        isLoading: _isAuthenticating || _isLoadingBranches,
         errorMessage: _authError,
+        branches: _branches,
         onSubmitPin: _handleLoginWithPin,
       );
     }

@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../core/session/app_session.dart';
-import '../../../core/platform/kitchen_printer.dart';
+
+import '../../../core/platform/printer_manager.dart';
+import '../../../core/platform/printer_models.dart';
 import '../constants/labels.dart';
 import '../figma_mock_data.dart';
 import '../figma_models.dart';
@@ -16,6 +18,8 @@ import 'hamburger_builder_view.dart';
 import 'panes_ajo_builder_view.dart';
 import 'pizza_builder_view.dart';
 import 'pos_functions_drawer.dart';
+import 'pos_printer_preview_dialog.dart';
+import 'pos_printer_settings_dialog.dart';
 import 'pos_sales_report_dialog.dart';
 
 import 'pos_top_header.dart';
@@ -1462,7 +1466,20 @@ class _PosWindowViewState extends State<PosWindowView> {
     _emitOrderChanged();
     final ticketText = _buildKitchenTicketText();
     try {
-      await KitchenPrinter.printKitchenTicket(ticketText);
+      final printer = PrinterManager.instance.resolvePrinter(PrinterDestination.kitchenTicket);
+      if (printer != null && printer.driver == PrinterDriver.pdf) {
+        if (!mounted) return;
+        await showPrinterPreviewDialog(
+          context,
+          title: 'Ticket cocina',
+          ticketText: ticketText,
+        );
+        return;
+      }
+      await PrinterManager.instance.printTicket(
+        destination: PrinterDestination.kitchenTicket,
+        text: ticketText,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(PosLabels.ticket.kitchenTicketSent)),
@@ -1687,6 +1704,10 @@ class _PosWindowViewState extends State<PosWindowView> {
       onCreateReport: () {
         if (!mounted) return;
         showPosSalesReportDialog(context);
+      },
+      onPrinterSettings: () {
+        if (!mounted) return;
+        showPrinterSettingsDialog(context);
       },
       onLogout: widget.onLogout,
     );
@@ -2030,7 +2051,7 @@ class _PosWindowViewState extends State<PosWindowView> {
     final response =
         await _session.apiClient.post('/auth/login', <String, dynamic>{
       'pin': '1234',
-      'sucursal_id': 1,
+      'sucursal_id': _session.branchId,
       'plataforma': 'pos_flutter',
     });
     if (response['success'] != true) {

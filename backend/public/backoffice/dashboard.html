@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - Rons Pizza Backoffice</title>
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-brand">Rons <span>Pizza</span></div>
+      <nav class="sidebar-nav">
+        <a href="#" class="active" onclick="navigate('dashboard')">Dashboard</a>
+        <a href="#" onclick="navigate('usuarios')">Usuarios</a>
+        <a href="#" onclick="navigate('sucursales')">Sucursales</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-info" id="user-info"><strong>-</strong><span>-</span></div>
+        <button class="btn btn-secondary w-100" onclick="logout()">Cerrar sesión</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <h2 id="page-title">Dashboard</h2>
+      </div>
+      <div class="content" id="content-area">
+        <!-- Dynamic content -->
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal Usuario -->
+  <div class="modal-overlay" id="modal-usuario">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-title">Nuevo Usuario</h3>
+        <button class="modal-close" onclick="hideModal('modal-usuario')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Usuario *</label>
+          <input type="text" id="inp-usuario" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label>Nombre *</label>
+          <input type="text" id="inp-nombre" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label>Apellido</label>
+          <input type="text" id="inp-apellido" class="form-control">
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="inp-email" class="form-control">
+        </div>
+        <div class="form-group">
+          <label>Contraseña <span id="password-help" class="text-muted" style="font-weight:400;font-size:12px;"></span></label>
+          <input type="password" id="inp-password" class="form-control">
+        </div>
+        <div class="form-group">
+          <label>Rol *</label>
+          <select id="inp-rol" class="form-control" required>
+            <option value="">Seleccionar...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Sucursal *</label>
+          <select id="inp-sucursal" class="form-control" required>
+            <option value="">Seleccionar...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Estado</label>
+          <select id="inp-activo" class="form-control">
+            <option value="1">Activo</option>
+            <option value="0">Inactivo</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="hideModal('modal-usuario')">Cancelar</button>
+        <button class="btn btn-primary" id="btn-guardar" onclick="guardarUsuario()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/main.js"></script>
+  <script src="js/usuarios.js"></script>
+  <script>
+    if (!requireAuth()) {} // redirected already
+
+    let currentView = 'dashboard';
+
+    function navigate(view) {
+      currentView = view;
+      document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.remove('active'));
+      const activeLink = Array.from(document.querySelectorAll('.sidebar-nav a')).find(a => a.textContent.toLowerCase().includes(view === 'dashboard' ? 'dash' : view === 'usuarios' ? 'usu' : 'suc'));
+      if (activeLink) activeLink.classList.add('active');
+
+      const content = document.getElementById('content-area');
+      const title = document.getElementById('page-title');
+
+      if (view === 'dashboard') {
+        title.textContent = 'Dashboard';
+        content.innerHTML = `
+          <div class="card">
+            <div class="card-header"><h3>Bienvenido al Backoffice</h3></div>
+            <p class="text-muted">Selecciona una opcion del menu lateral para comenzar.</p>
+          </div>`;
+      } else if (view === 'usuarios') {
+        title.textContent = 'Usuarios del Sistema';
+        content.innerHTML = `
+          <div class="card">
+            <div class="card-header">
+              <h3>Usuarios</h3>
+              <button class="btn btn-primary" onclick="abrirModalCrear()">+ Nuevo Usuario</button>
+            </div>
+            <div class="filters">
+              <select id="filtro-sucursal" class="form-control" onchange="loadUsuarios()"><option value="">Todas las sucursales</option></select>
+              <select id="filtro-rol" class="form-control" onchange="loadUsuarios()"><option value="">Todos los roles</option></select>
+              <input type="text" id="filtro-busqueda" class="form-control" placeholder="Buscar usuario o nombre..." oninput="loadUsuarios()">
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>ID</th><th>Sucursal</th><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th style="text-align:right">Acciones</th></tr>
+                </thead>
+                <tbody id="usuarios-body"></tbody>
+              </table>
+            </div>
+          </div>`;
+        initUsuarios();
+      } else if (view === 'sucursales') {
+        title.textContent = 'Sucursales';
+        content.innerHTML = `
+          <div class="card">
+            <div class="card-header"><h3>Sucursales</h3></div>
+            <p class="text-muted">Gestion de sucursales - proximamente.</p>
+          </div>`;
+      }
+    }
+
+    (async function boot() {
+      const ok = await checkSession();
+      if (ok) navigate('dashboard');
+    })();
+  </script>
+</body>
+</html>

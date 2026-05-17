@@ -3,6 +3,7 @@
 Future<void> showPosFunctionsDrawer(
   BuildContext context, {
   VoidCallback? onCreateReport,
+  VoidCallback? onPrinterSettings,
   VoidCallback? onLogout,
 }) async {
   await showGeneralDialog<void>(
@@ -23,6 +24,7 @@ Future<void> showPosFunctionsDrawer(
               height: double.infinity,
               child: _PosFunctionsPanel(
                 onCreateReport: onCreateReport,
+                onPrinterSettings: onPrinterSettings,
                 onLogout: onLogout,
               ),
             ),
@@ -41,9 +43,10 @@ Future<void> showPosFunctionsDrawer(
 }
 
 class _PosFunctionsPanel extends StatelessWidget {
-  const _PosFunctionsPanel({this.onCreateReport, this.onLogout});
+  const _PosFunctionsPanel({this.onCreateReport, this.onPrinterSettings, this.onLogout});
 
   final VoidCallback? onCreateReport;
+  final VoidCallback? onPrinterSettings;
   final VoidCallback? onLogout;
 
   @override
@@ -117,6 +120,11 @@ class _PosFunctionsPanel extends StatelessWidget {
                 icon: Icons.assessment_outlined,
                 label: 'Crear reporte',
                 onTap: onCreateReport,
+              ),
+              item(
+                icon: Icons.print_outlined,
+                label: 'Impresora',
+                onTap: onPrinterSettings,
               ),
               item(icon: Icons.logout, label: 'Cerrar sesión', onTap: onLogout),
             ],

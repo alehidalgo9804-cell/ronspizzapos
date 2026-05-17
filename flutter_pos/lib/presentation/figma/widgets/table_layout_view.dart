@@ -4,6 +4,7 @@ import '../../../core/session/app_session.dart';
 import '../constants/labels.dart';
 import '../figma_models.dart';
 import 'pos_functions_drawer.dart';
+import 'pos_printer_settings_dialog.dart';
 import 'pos_sales_report_dialog.dart';
 
 import 'pos_top_header.dart';
@@ -432,6 +433,10 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
       onCreateReport: () {
         if (!mounted) return;
         showPosSalesReportDialog(context);
+      },
+      onPrinterSettings: () {
+        if (!mounted) return;
+        showPrinterSettingsDialog(context);
       },
       onLogout: widget.onLogout,
     );

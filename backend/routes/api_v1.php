@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Controllers\V1\AdminAuthController;
+use App\Controllers\V1\AdminUserController;
 use App\Controllers\V1\AuthController;
 use App\Controllers\V1\BranchController;
 use App\Controllers\V1\CashController;
@@ -17,18 +19,18 @@ use App\Controllers\V1\EmployeeController;
 use App\Controllers\V1\ProductController;
 use App\Controllers\V1\ReportController;
 use App\Controllers\V1\TicketController;
+use App\Middleware\AdminMiddleware;
 use App\Middleware\AuthMiddleware;
 use App\Middleware\BranchScopeMiddleware;
 use App\Middleware\JsonBodyMiddleware;
 
 $router->group('/api/v1', [new JsonBodyMiddleware()], function ($router): void {
     $router->post('/auth/login', [AuthController::class, 'login']);
+    $router->get('/branches', [BranchController::class, 'index']);
 
     $router->group('', [new AuthMiddleware(), new BranchScopeMiddleware()], function ($router): void {
         $router->get('/auth/me', [AuthController::class, 'me']);
         $router->post('/auth/logout', [AuthController::class, 'logout']);
-
-        $router->get('/branches', [BranchController::class, 'index']);
 
         $router->get('/customers', [CustomerController::class, 'index']);
         $router->get('/customers/search', [CustomerController::class, 'search']);
@@ -89,4 +91,25 @@ $router->group('/api/v1', [new JsonBodyMiddleware()], function ($router): void {
         $router->get('/drivers', [DriverController::class, 'index']);
         $router->get('/drivers/me', [DriverController::class, 'me']);
     });
+
+    // Backoffice routes (admin only)
+    $router->group('/backoffice', [new AdminMiddleware()], function ($router): void {
+        $router->post('/logout', [AdminAuthController::class, 'logout']);
+        $router->get('/me', [AdminAuthController::class, 'me']);
+
+        $router->get('/usuarios', [AdminUserController::class, 'index']);
+        $router->get('/usuarios/{id}', [AdminUserController::class, 'show']);
+        $router->post('/usuarios', [AdminUserController::class, 'store']);
+        $router->put('/usuarios/{id}', [AdminUserController::class, 'update']);
+        $router->delete('/usuarios/{id}', [AdminUserController::class, 'destroy']);
+
+        $router->get('/sucursales', [BranchController::class, 'index']);
+        $router->get('/roles', function () use ($router) {
+            $pdo = \App\Core\Database::connection();
+            $rows = $pdo->query("SELECT id, nombre, descripcion FROM roles ORDER BY id")->fetchAll(\PDO::FETCH_ASSOC);
+            \App\Core\Response::json(['success' => true, 'data' => $rows]);
+        });
+    });
+
+    $router->post('/backoffice/login', [AdminAuthController::class, 'login']);
 });

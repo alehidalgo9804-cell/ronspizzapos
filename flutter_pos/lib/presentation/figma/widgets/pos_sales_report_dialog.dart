@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/platform/kitchen_printer.dart';
+import '../../../core/platform/printer_manager.dart';
+import '../../../core/platform/printer_models.dart';
 import '../../../core/session/app_session.dart';
 
 Future<void> showPosSalesReportDialog(BuildContext context) async {
@@ -786,7 +787,23 @@ class _SalesPreviewDialogState extends State<_SalesPreviewDialog> {
   Future<void> _printReport() async {
     setState(() => _isPrinting = true);
     try {
-      await KitchenPrinter.printCustomerReceipt(_buildPrintableReportText());
+      final printer = PrinterManager.instance.resolvePrinter(PrinterDestination.salesReport);
+      if (printer != null && printer.driver == PrinterDriver.pdf) {
+        if (!mounted) return;
+        final filePath = await PrinterManager.instance.printTicket(
+          destination: PrinterDestination.salesReport,
+          text: _buildPrintableReportText(),
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Reporte guardado: $filePath')),
+        );
+        return;
+      }
+      await PrinterManager.instance.printTicket(
+        destination: PrinterDestination.salesReport,
+        text: _buildPrintableReportText(),
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Reporte enviado a impresion.')),

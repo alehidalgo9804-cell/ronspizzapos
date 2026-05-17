@@ -19,6 +19,26 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
 
 [$router, $request] = require __DIR__ . '/../bootstrap/app.php';
 
+// Serve static backoffice files directly
+if (str_starts_with($request->uri, '/backoffice/')) {
+    $file = __DIR__ . $request->uri;
+    if (is_file($file)) {
+        $ext = pathinfo($file, PATHINFO_EXTENSION);
+        $mime = match ($ext) {
+            'css' => 'text/css',
+            'js' => 'application/javascript',
+            'html' => 'text/html',
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'svg' => 'image/svg+xml',
+            default => mime_content_type($file) ?: 'application/octet-stream',
+        };
+        header('Content-Type: ' . $mime);
+        readfile($file);
+        return;
+    }
+}
+
 if ($request->uri === '/health') {
     Response::json([
         'success' => true,
