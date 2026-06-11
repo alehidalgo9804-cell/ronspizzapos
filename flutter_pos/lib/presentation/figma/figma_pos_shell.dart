@@ -1488,10 +1488,10 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     required AppOrder order,
     required bool isReprint,
   }) {
-    const lineWidth = 42;
-    const itemNameWidth = 19;
+    final lineWidth = PrinterManager.instance.charsPerLine(PrinterDestination.customerReceipt);
     const qtyWidth = 4;
     const moneyWidth = 8;
+    final itemNameWidth = lineWidth - qtyWidth - moneyWidth - moneyWidth - 3;
 
     String spaces(int count) => count <= 0 ? '' : ' ' * count;
     String divider() => '-' * lineWidth;

@@ -19,6 +19,19 @@ extension PrinterDriverLabel on PrinterDriver {
   }
 }
 
+enum PrinterPaperWidth { mm58, mm80 }
+
+extension PrinterPaperWidthLabel on PrinterPaperWidth {
+  String get label {
+    switch (this) {
+      case PrinterPaperWidth.mm58:
+        return '58 mm';
+      case PrinterPaperWidth.mm80:
+        return '80 mm';
+    }
+  }
+}
+
 /// Destino / rol de la impresora dentro del POS.
 enum PrinterDestination {
   /// Ticket para el cliente (recibo de pago).
@@ -51,24 +64,28 @@ class PosPrinter {
   String name;
   PrinterDriver driver;
   bool enabled;
+  PrinterPaperWidth paperWidth;
 
   PosPrinter({
     required this.id,
     required this.name,
     this.driver = PrinterDriver.pdf,
     this.enabled = true,
+    this.paperWidth = PrinterPaperWidth.mm58,
   });
 
   PosPrinter copyWith({
     String? name,
     PrinterDriver? driver,
     bool? enabled,
+    PrinterPaperWidth? paperWidth,
   }) {
     return PosPrinter(
       id: id,
       name: name ?? this.name,
       driver: driver ?? this.driver,
       enabled: enabled ?? this.enabled,
+      paperWidth: paperWidth ?? this.paperWidth,
     );
   }
 }

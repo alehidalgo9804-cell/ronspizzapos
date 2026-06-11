@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -12,14 +13,22 @@ class PrinterManager {
   PrinterManager._();
   static final PrinterManager instance = PrinterManager._();
 
+  static const String _defaultPdfPrinterId = 'pdf-default';
+  static const String _defaultPdfPrinterName = 'PDF - Vista previa';
+
   final List<PosPrinter> _printers = [
-    PosPrinter(id: 'pdf-default', name: 'PDF - Vista previa', driver: PrinterDriver.pdf, enabled: true),
+    PosPrinter(
+      id: _defaultPdfPrinterId,
+      name: _defaultPdfPrinterName,
+      driver: PrinterDriver.pdf,
+      enabled: true,
+    ),
   ];
 
   PrinterRouting _routing = PrinterRouting(
-    customerReceiptPrinterId: 'pdf-default',
-    kitchenTicketPrinterId: 'pdf-default',
-    salesReportPrinterId: 'pdf-default',
+    customerReceiptPrinterId: _defaultPdfPrinterId,
+    kitchenTicketPrinterId: _defaultPdfPrinterId,
+    salesReportPrinterId: _defaultPdfPrinterId,
   );
 
   List<PosPrinter> get printers => List.unmodifiable(_printers);
@@ -36,25 +45,173 @@ class PrinterManager {
 
   PosPrinter? resolvePrinter(PrinterDestination destination) {
     final id = _routing.printerIdFor(destination);
-    return findPrinter(id) ?? findPrinter('pdf-default');
+    return findPrinter(id) ?? findPrinter(_defaultPdfPrinterId);
   }
 
   void addPrinter(PosPrinter printer) {
-    _printers.add(printer);
+    final existingIndex = _printers.indexWhere((p) => p.id == printer.id);
+    if (existingIndex >= 0) {
+      _printers[existingIndex] = printer;
+    } else {
+      _printers.add(printer);
+    }
   }
 
   void updatePrinter(PosPrinter printer) {
     final index = _printers.indexWhere((p) => p.id == printer.id);
-    if (index >= 0) _printers[index] = printer;
+    if (index >= 0) {
+      if (printer.id == 'pdf-default') {
+        _printers[index] = printer.copyWith(enabled: true);
+      } else {
+        _printers[index] = printer;
+      }
+    }
   }
 
   void removePrinter(String id) {
-    if (id == 'pdf-default') return; // no borrar la default
+    if (id == _defaultPdfPrinterId) return; // no borrar la default
     _printers.removeWhere((p) => p.id == id);
   }
 
   void updateRouting(PrinterRouting routing) {
     _routing = routing;
+  }
+
+  Future<void> loadConfiguration() async {
+    if (kIsWeb) {
+      _normalizeState();
+      return;
+    }
+    try {
+      final file = await _configFile();
+      if (!await file.exists()) {
+        _normalizeState();
+        return;
+      }
+      final raw = await file.readAsString();
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        _normalizeState();
+        return;
+      }
+
+      final printersJson = decoded['printers'];
+      final loadedPrinters = <PosPrinter>[];
+      if (printersJson is List) {
+        for (final item in printersJson) {
+          if (item is! Map) continue;
+          final id = '${item['id'] ?? ''}'.trim();
+          final name = '${item['name'] ?? ''}'.trim();
+          final driverRaw = '${item['driver'] ?? ''}'.trim();
+          final enabledRaw = item['enabled'];
+          if (id.isEmpty || name.isEmpty) continue;
+          final driver = _driverFromString(driverRaw);
+          final enabled = enabledRaw is bool ? enabledRaw : true;
+          final paperWidth = _paperWidthFromString('${item['paperWidth'] ?? ''}'.trim());
+          loadedPrinters.add(
+            PosPrinter(id: id, name: name, driver: driver, enabled: enabled, paperWidth: paperWidth),
+          );
+        }
+      }
+
+      if (loadedPrinters.isNotEmpty) {
+        _printers
+          ..clear()
+          ..addAll(loadedPrinters);
+      }
+
+      final routingJson = decoded['routing'];
+      if (routingJson is Map) {
+        _routing = PrinterRouting(
+          customerReceiptPrinterId:
+              '${routingJson['customerReceiptPrinterId'] ?? ''}'.trim().isEmpty
+                  ? null
+                  : '${routingJson['customerReceiptPrinterId']}'.trim(),
+          kitchenTicketPrinterId:
+              '${routingJson['kitchenTicketPrinterId'] ?? ''}'.trim().isEmpty
+                  ? null
+                  : '${routingJson['kitchenTicketPrinterId']}'.trim(),
+          salesReportPrinterId:
+              '${routingJson['salesReportPrinterId'] ?? ''}'.trim().isEmpty
+                  ? null
+                  : '${routingJson['salesReportPrinterId']}'.trim(),
+        );
+      }
+      _normalizeState();
+    } catch (_) {
+      _normalizeState();
+    }
+  }
+
+  Future<void> saveConfiguration() async {
+    if (kIsWeb) return;
+    _normalizeState();
+    final file = await _configFile();
+    await file.parent.create(recursive: true);
+    await file.writeAsString(
+      jsonEncode({
+        'printers': _printers
+            .map((p) => {
+                  'id': p.id,
+                  'name': p.name,
+                  'driver': p.driver.name,
+                  'enabled': p.enabled,
+                  'paperWidth': p.paperWidth.name,
+                })
+            .toList(),
+        'routing': {
+          'customerReceiptPrinterId': _routing.customerReceiptPrinterId,
+          'kitchenTicketPrinterId': _routing.kitchenTicketPrinterId,
+          'salesReportPrinterId': _routing.salesReportPrinterId,
+        },
+      }),
+    );
+  }
+
+  void _normalizeState() {
+    final unique = <String, PosPrinter>{};
+    for (final printer in _printers) {
+      unique[printer.id] = printer;
+    }
+
+    final defaultPrinter = unique[_defaultPdfPrinterId];
+    unique[_defaultPdfPrinterId] = PosPrinter(
+      id: _defaultPdfPrinterId,
+      name: (defaultPrinter?.name.trim().isNotEmpty ?? false)
+          ? defaultPrinter!.name
+          : _defaultPdfPrinterName,
+      driver: PrinterDriver.pdf,
+      enabled: true,
+    );
+
+    _printers
+      ..clear()
+      ..addAll(unique.values);
+  }
+
+  PrinterDriver _driverFromString(String value) {
+    for (final driver in PrinterDriver.values) {
+      if (driver.name == value) return driver;
+    }
+    return PrinterDriver.pdf;
+  }
+
+  PrinterPaperWidth _paperWidthFromString(String value) {
+    for (final w in PrinterPaperWidth.values) {
+      if (w.name == value) return w;
+    }
+    return PrinterPaperWidth.mm58;
+  }
+
+  int charsPerLine(PrinterDestination destination) {
+    final printer = resolvePrinter(destination);
+    if (printer?.paperWidth == PrinterPaperWidth.mm80) return 56;
+    return 42;
+  }
+
+  Future<File> _configFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}\\rons_pizza_pos\\printer_config.json');
   }
 
   /// Imprime o exporta el [text] según la impresora asignada al [destination].
@@ -84,6 +241,39 @@ class PrinterManager {
           await KitchenPrinter.printCustomerReceipt(text);
         }
         return null;
+    }
+  }
+
+  /// Imprime bytes ESC/POS raw en la impresora térmica asignada al [destination].
+  /// Solo válido para impresoras térmicas (no PDF).
+  Future<void> printEscPosTicket({
+    required PrinterDestination destination,
+    required Uint8List bytes,
+  }) async {
+    final printer = resolvePrinter(destination);
+    if (printer == null) {
+      throw Exception('No hay impresora configurada para ${destination.label}');
+    }
+
+    switch (printer.driver) {
+      case PrinterDriver.pdf:
+        throw Exception(
+          'ESC/POS no está soportado en modo PDF. '
+          'Usa printTicket() para generar vista previa.',
+        );
+      case PrinterDriver.thermalWindows:
+        if (kIsWeb || !Platform.isWindows) {
+          throw PlatformException(
+            code: 'UNSUPPORTED_PLATFORM',
+            message: 'Impresion térmica solo disponible en Windows desktop.',
+          );
+        }
+        if (destination == PrinterDestination.kitchenTicket) {
+          await KitchenPrinter.printKitchenTicketBytes(bytes);
+        } else {
+          await KitchenPrinter.printCustomerReceiptBytes(bytes);
+        }
+        return;
     }
   }
 

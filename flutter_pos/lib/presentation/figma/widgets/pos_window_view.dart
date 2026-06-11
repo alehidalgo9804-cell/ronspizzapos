@@ -1666,7 +1666,7 @@ class _PosWindowViewState extends State<PosWindowView> {
     List<OrderItemData>? items,
     String? area,
   }) {
-    const lineWidth = 50;
+    final lineWidth = PrinterManager.instance.charsPerLine(PrinterDestination.kitchenTicket);
     const qtyWidth = 4;
     final ticketItems = items ?? _orderItems;
     final ticketArea = area ?? _resolveItemArea(ticketItems.first);
@@ -1768,7 +1768,7 @@ class _PosWindowViewState extends State<PosWindowView> {
     List<OrderItemData>? items,
     String? area,
   }) {
-    const lineWidth = 42;
+    final lineWidth = PrinterManager.instance.charsPerLine(PrinterDestination.kitchenTicket);
     const qtyWidth = 4;
     final ticketItems = items ?? _orderItems;
     final ticketArea = area ?? _resolveItemArea(ticketItems.first);
@@ -2800,10 +2800,10 @@ class _PosWindowViewState extends State<PosWindowView> {
   }
 
   String _buildDeliveryOrderReceiptText(AppOrder order) {
-    const lineWidth = 42;
-    const itemNameWidth = 19;
+    final lineWidth = PrinterManager.instance.charsPerLine(PrinterDestination.customerReceipt);
     const qtyWidth = 4;
     const moneyWidth = 8;
+    final itemNameWidth = lineWidth - qtyWidth - moneyWidth - moneyWidth - 3;
 
     String spaces(int count) => count <= 0 ? '' : ' ' * count;
     String divider() => '-' * lineWidth;

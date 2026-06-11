@@ -34,6 +34,7 @@ class _PrinterSettingsDialog extends StatefulWidget {
 
 class _PrinterSettingsDialogState extends State<_PrinterSettingsDialog> {
   final PrinterManager _manager = PrinterManager.instance;
+  bool _isSavingConfiguration = false;
 
   void _addPrinter() {
     final id = 'printer_${DateTime.now().millisecondsSinceEpoch}';
@@ -67,6 +68,27 @@ class _PrinterSettingsDialogState extends State<_PrinterSettingsDialog> {
         break;
     }
     setState(() {});
+  }
+
+  Future<void> _saveConfiguration() async {
+    if (_isSavingConfiguration) return;
+    setState(() => _isSavingConfiguration = true);
+    try {
+      await _manager.saveConfiguration();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Configuración de impresoras guardada')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSavingConfiguration = false);
+      }
+    }
   }
 
   Future<void> _testPrint(PrinterDestination dest) async {
@@ -224,6 +246,42 @@ class _PrinterSettingsDialogState extends State<_PrinterSettingsDialog> {
                 ),
               ),
             ),
+            Container(
+              padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isSavingConfiguration
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      child: const Text('Cerrar'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _isSavingConfiguration ? null : _saveConfiguration,
+                      icon: _isSavingConfiguration
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined, size: 18),
+                      label: Text(
+                        _isSavingConfiguration
+                            ? 'Guardando...'
+                            : 'Guardar configuración',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -280,11 +338,26 @@ class _PrinterSettingsDialogState extends State<_PrinterSettingsDialog> {
                 },
               ),
             ),
+            const SizedBox(height: 8),
+            DropdownButtonHideUnderline(
+              child: DropdownButton<PrinterPaperWidth>(
+                isExpanded: true,
+                value: printer.paperWidth,
+                items: PrinterPaperWidth.values
+                    .map((w) => DropdownMenuItem(value: w, child: Text(w.label)))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) _updatePrinter(printer.copyWith(paperWidth: v));
+                },
+              ),
+            ),
             Row(
               children: [
                 Checkbox(
                   value: printer.enabled,
-                  onChanged: (v) => _updatePrinter(printer.copyWith(enabled: v ?? true)),
+                  onChanged: printer.id == 'pdf-default'
+                      ? null
+                      : (v) => _updatePrinter(printer.copyWith(enabled: v ?? true)),
                 ),
                 const Text('Activa'),
                 const Spacer(),
@@ -319,7 +392,10 @@ class _PrinterSettingsDialogState extends State<_PrinterSettingsDialog> {
     required PrinterDestination destination,
     required String? selectedId,
   }) {
-    final printers = _manager.printers.where((p) => p.enabled).toList();
+    final printers = {
+      for (final p in _manager.printers.where((p) => p.enabled)) p.id: p,
+    }.values.toList();
+    final selectedValue = printers.any((p) => p.id == selectedId) ? selectedId : null;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -344,7 +420,7 @@ class _PrinterSettingsDialogState extends State<_PrinterSettingsDialog> {
                   child: DropdownButton<String>(
                     isExpanded: true,
                     isDense: true,
-                    value: selectedId,
+                    value: selectedValue,
                     hint: const Text('Seleccionar impresora'),
                     items: printers
                         .map((p) => DropdownMenuItem(value: p.id, child: Text(p.name)))
