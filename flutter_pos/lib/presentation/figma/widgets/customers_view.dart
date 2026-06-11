@@ -169,7 +169,6 @@ class _CustomersViewState extends State<CustomersView> {
     final nameController = TextEditingController(text: customer?.name ?? '');
     final phoneController = TextEditingController(text: customer?.phone ?? '');
     final streetController = TextEditingController();
-    final neighborhoodController = TextEditingController();
     final extNumberController = TextEditingController();
     final referenceController = TextEditingController();
 
@@ -220,12 +219,6 @@ class _CustomersViewState extends State<CustomersView> {
                   ),
                   const SizedBox(height: 12),
                   _buildField(
-                    label: 'Colonia',
-                    controller: neighborhoodController,
-                    hint: 'Ej. Centro',
-                  ),
-                  const SizedBox(height: 12),
-                  _buildField(
                     label: 'Número exterior',
                     controller: extNumberController,
                     hint: 'Ej. 123',
@@ -256,10 +249,8 @@ class _CustomersViewState extends State<CustomersView> {
                     await _saveAddress(
                       customerId: newId,
                       street: streetController.text,
-                      neighborhood: neighborhoodController.text,
                       exteriorNumber: extNumberController.text,
                       reference: referenceController.text,
-                      alias: 'Principal',
                     );
                   }
                 } else {
@@ -272,10 +263,8 @@ class _CustomersViewState extends State<CustomersView> {
                     await _saveAddress(
                       customerId: customer.id,
                       street: streetController.text,
-                      neighborhood: neighborhoodController.text,
                       exteriorNumber: extNumberController.text,
                       reference: referenceController.text,
-                      alias: 'Principal',
                     );
                   }
                 }
@@ -291,7 +280,6 @@ class _CustomersViewState extends State<CustomersView> {
     nameController.dispose();
     phoneController.dispose();
     streetController.dispose();
-    neighborhoodController.dispose();
     extNumberController.dispose();
     referenceController.dispose();
   }
@@ -387,20 +375,10 @@ class _CustomersViewState extends State<CustomersView> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  if (a.alias != null && a.alias!.isNotEmpty)
-                                    Text(
-                                      a.alias!,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12,
-                                        color: Color(0xFF2563EB),
-                                      ),
-                                    ),
                                   Text(
                                     [
                                       a.street,
                                       a.exteriorNumber,
-                                      a.neighborhood,
                                     ].where((s) => s != null && s.isNotEmpty).join(', '),
                                     style: const TextStyle(
                                       fontSize: 13,
@@ -456,13 +434,10 @@ class _CustomersViewState extends State<CustomersView> {
     CustomerAddressData? address,
   }) async {
     final streetController = TextEditingController(text: address?.street ?? '');
-    final neighborhoodController =
-        TextEditingController(text: address?.neighborhood ?? '');
     final extNumberController =
         TextEditingController(text: address?.exteriorNumber ?? '');
     final referenceController =
         TextEditingController(text: address?.reference ?? '');
-    final aliasController = TextEditingController(text: address?.alias ?? '');
 
     await showDialog<void>(
       context: context,
@@ -478,21 +453,9 @@ class _CustomersViewState extends State<CustomersView> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _buildField(
-                    label: 'Alias',
-                    controller: aliasController,
-                    hint: 'Ej. Casa, Trabajo',
-                  ),
-                  const SizedBox(height: 12),
-                  _buildField(
                     label: 'Calle y número',
                     controller: streetController,
                     hint: 'Ej. Av. Hidalgo 123',
-                  ),
-                  const SizedBox(height: 12),
-                  _buildField(
-                    label: 'Colonia',
-                    controller: neighborhoodController,
-                    hint: 'Ej. Centro',
                   ),
                   const SizedBox(height: 12),
                   _buildField(
@@ -520,10 +483,8 @@ class _CustomersViewState extends State<CustomersView> {
                 await _saveAddress(
                   customerId: customerId,
                   street: streetController.text,
-                  neighborhood: neighborhoodController.text,
                   exteriorNumber: extNumberController.text,
                   reference: referenceController.text,
-                  alias: aliasController.text,
                 );
                 if (mounted) nav.pop();
               },
@@ -535,10 +496,8 @@ class _CustomersViewState extends State<CustomersView> {
     );
 
     streetController.dispose();
-    neighborhoodController.dispose();
     extNumberController.dispose();
     referenceController.dispose();
-    aliasController.dispose();
   }
 
   Widget _buildField({
