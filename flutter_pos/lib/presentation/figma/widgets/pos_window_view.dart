@@ -2485,7 +2485,14 @@ class _PosWindowViewState extends State<PosWindowView> {
       '${raw['colonia'] ?? ''}'.trim(),
       '${raw['ciudad'] ?? ''}'.trim(),
     ].where((part) => part.isNotEmpty).toList(growable: false);
-    if (parts.isNotEmpty) return parts.join(', ');
+    if (parts.isNotEmpty) {
+      final label = parts.join(', ');
+      final ref = '${raw['referencia'] ?? ''}'.trim();
+      if (ref.isNotEmpty) return '$label ($ref)';
+      return label;
+    }
+    final ref = '${raw['referencia'] ?? ''}'.trim();
+    if (ref.isNotEmpty) return ref;
     return '${raw['alias'] ?? 'Dirección'}'.trim();
   }
 
@@ -2539,6 +2546,11 @@ class _PosWindowViewState extends State<PosWindowView> {
       _deliveryShippingController.text = option.costoEnvio!.toStringAsFixed(2);
     } else {
       _deliveryShippingController.text = '';
+    }
+    if (option?.details != null) {
+      _deliveryNotesController.text = option!.details!.trim();
+    } else {
+      _deliveryNotesController.text = '';
     }
   }
 
