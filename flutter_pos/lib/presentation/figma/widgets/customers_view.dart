@@ -44,9 +44,7 @@ class _CustomersViewState extends State<CustomersView> {
         final list = (response['data'] as List)
             .map((e) => CustomerData.fromJson(e as Map<String, dynamic>))
             .toList();
-        setState(() {
-          _customers = list;
-        });
+        setState(() => _customers = list);
       }
     } finally {
       setState(() => _loading = false);
@@ -63,9 +61,7 @@ class _CustomersViewState extends State<CustomersView> {
         final list = (response['data'] as List)
             .map((e) => CustomerData.fromJson(e as Map<String, dynamic>))
             .toList();
-        setState(() {
-          _customers = list;
-        });
+        setState(() => _customers = list);
       }
     } finally {
       setState(() => _loading = false);
@@ -99,7 +95,6 @@ class _CustomersViewState extends State<CustomersView> {
         : await widget.apiClient.put('/customers/$id', body);
     if (response['success'] == true) {
       _loadCustomers();
-      if (mounted) Navigator.of(context).pop();
     } else {
       final message = response['message']?.toString() ?? 'Error al guardar';
       if (mounted) {
@@ -110,35 +105,139 @@ class _CustomersViewState extends State<CustomersView> {
     }
   }
 
+  Future<int?> _createCustomer({
+    required String name,
+    required String phone,
+  }) async {
+    if (name.trim().isEmpty) return null;
+    final response = await widget.apiClient.post('/customers', <String, dynamic>{
+      'nombre': name.trim(),
+      'telefono': phone.trim(),
+    });
+    if (response['success'] == true && response['data'] is Map) {
+      return (response['data'] as Map)['id'] as int?;
+    }
+    final message = response['message']?.toString() ?? 'Error al crear cliente';
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
+    return null;
+  }
+
+  Future<void> _saveAddress({
+    required int customerId,
+    String? street,
+    String? neighborhood,
+    String? exteriorNumber,
+    String? reference,
+    String? alias,
+  }) async {
+    if (street == null || street.trim().isEmpty) return;
+    final body = <String, dynamic>{
+      'cliente_id': customerId,
+      'calle': street.trim(),
+      if (neighborhood != null && neighborhood.trim().isNotEmpty)
+        'colonia': neighborhood.trim(),
+      if (exteriorNumber != null && exteriorNumber.trim().isNotEmpty)
+        'numero_exterior': exteriorNumber.trim(),
+      if (reference != null && reference.trim().isNotEmpty)
+        'referencia': reference.trim(),
+      'alias': (alias != null && alias.trim().isNotEmpty)
+          ? alias.trim()
+          : 'Principal',
+      'activa': 1,
+    };
+    final response =
+        await widget.apiClient.post('/customers/$customerId/addresses', body);
+    if (response['success'] != true && mounted) {
+      final message = response['message']?.toString() ?? 'Error al guardar dirección';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  Future<List<CustomerAddressData>> _loadAddresses(int customerId) async {
+    final response = await widget.apiClient.get('/customers/$customerId/addresses');
+    if (response['success'] == true && response['data'] is List) {
+      return (response['data'] as List)
+          .map((e) => CustomerAddressData.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
+    return [];
+  }
+
   Future<void> _showCustomerDialog({CustomerData? customer}) async {
     final nameController = TextEditingController(text: customer?.name ?? '');
     final phoneController = TextEditingController(text: customer?.phone ?? '');
-    final isEditing = customer != null;
+    final streetController = TextEditingController();
+    final neighborhoodController = TextEditingController();
+    final extNumberController = TextEditingController();
+    final referenceController = TextEditingController();
 
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) {
+      builder: (dialogContext) {
+        final nav = Navigator.of(context);
         return AlertDialog(
-          title: Text(isEditing ? 'Editar cliente' : 'Nuevo cliente'),
+          title: Text(customer == null ? 'Nuevo cliente' : 'Editar cliente'),
           content: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 400),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildField(
-                  label: PosLabels.order.customerName,
-                  controller: nameController,
-                  hint: PosLabels.order.enterCustomerName,
-                ),
-                const SizedBox(height: 12),
-                _buildField(
-                  label: PosLabels.order.phoneNumber,
-                  controller: phoneController,
-                  hint: PosLabels.order.enterPhoneNumber,
-                  keyboardType: TextInputType.phone,
-                ),
-              ],
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildField(
+                    label: PosLabels.order.customerName,
+                    controller: nameController,
+                    hint: PosLabels.order.enterCustomerName,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildField(
+                    label: PosLabels.order.phoneNumber,
+                    controller: phoneController,
+                    hint: PosLabels.order.enterPhoneNumber,
+                    keyboardType: TextInputType.phone,
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Dirección principal',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildField(
+                    label: 'Calle y número',
+                    controller: streetController,
+                    hint: 'Ej. Av. Hidalgo 123',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildField(
+                    label: 'Colonia',
+                    controller: neighborhoodController,
+                    hint: 'Ej. Centro',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildField(
+                    label: 'Número exterior',
+                    controller: extNumberController,
+                    hint: 'Ej. 123',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildField(
+                    label: 'Referencia / Detalles',
+                    controller: referenceController,
+                    hint: 'Portón azul, 2do piso...',
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -147,12 +246,40 @@ class _CustomersViewState extends State<CustomersView> {
               child: Text(PosLabels.buttons.cancel),
             ),
             TextButton(
-              onPressed: () {
-                _saveCustomer(
-                  id: customer?.id,
-                  name: nameController.text,
-                  phone: phoneController.text,
-                );
+              onPressed: () async {
+                if (customer == null) {
+                  final newId = await _createCustomer(
+                    name: nameController.text,
+                    phone: phoneController.text,
+                  );
+                  if (newId != null && streetController.text.trim().isNotEmpty) {
+                    await _saveAddress(
+                      customerId: newId,
+                      street: streetController.text,
+                      neighborhood: neighborhoodController.text,
+                      exteriorNumber: extNumberController.text,
+                      reference: referenceController.text,
+                      alias: 'Principal',
+                    );
+                  }
+                } else {
+                  await _saveCustomer(
+                    id: customer.id,
+                    name: nameController.text,
+                    phone: phoneController.text,
+                  );
+                  if (streetController.text.trim().isNotEmpty) {
+                    await _saveAddress(
+                      customerId: customer.id,
+                      street: streetController.text,
+                      neighborhood: neighborhoodController.text,
+                      exteriorNumber: extNumberController.text,
+                      reference: referenceController.text,
+                      alias: 'Principal',
+                    );
+                  }
+                }
+                if (mounted) nav.pop();
               },
               child: Text(PosLabels.buttons.save),
             ),
@@ -163,6 +290,255 @@ class _CustomersViewState extends State<CustomersView> {
 
     nameController.dispose();
     phoneController.dispose();
+    streetController.dispose();
+    neighborhoodController.dispose();
+    extNumberController.dispose();
+    referenceController.dispose();
+  }
+
+  Future<void> _showCustomerDetailDialog(CustomerData customer) async {
+    final nameController = TextEditingController(text: customer.name);
+    final phoneController = TextEditingController(text: customer.phone ?? '');
+    List<CustomerAddressData> addresses = [];
+    bool loadingAddresses = true;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        final nav = Navigator.of(context);
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> fetch() async {
+              final list = await _loadAddresses(customer.id);
+              setDialogState(() {
+                addresses = list;
+                loadingAddresses = false;
+              });
+            }
+
+            if (loadingAddresses && addresses.isEmpty) {
+              fetch();
+            }
+
+            return AlertDialog(
+              title: const Text('Detalle del cliente'),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 450, maxHeight: 500),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildField(
+                        label: PosLabels.order.customerName,
+                        controller: nameController,
+                        hint: PosLabels.order.enterCustomerName,
+                      ),
+                      const SizedBox(height: 12),
+                      _buildField(
+                        label: PosLabels.order.phoneNumber,
+                        controller: phoneController,
+                        hint: PosLabels.order.enterPhoneNumber,
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Direcciones',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF111827),
+                              ),
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () async {
+                              await _showAddressDialog(customerId: customer.id);
+                              await fetch();
+                            },
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('Agregar'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      if (loadingAddresses)
+                        const Center(child: CircularProgressIndicator())
+                      else if (addresses.isEmpty)
+                        const Text(
+                          'Sin direcciones registradas',
+                          style: TextStyle(color: Color(0xFF6B7280)),
+                        )
+                      else
+                        ...addresses.map((a) {
+                          return Card(
+                            elevation: 0,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              side: const BorderSide(color: Color(0xFFE5E7EB)),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (a.alias != null && a.alias!.isNotEmpty)
+                                    Text(
+                                      a.alias!,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
+                                        color: Color(0xFF2563EB),
+                                      ),
+                                    ),
+                                  Text(
+                                    [
+                                      a.street,
+                                      a.exteriorNumber,
+                                      a.neighborhood,
+                                    ].where((s) => s != null && s.isNotEmpty).join(', '),
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Color(0xFF111827),
+                                    ),
+                                  ),
+                                  if (a.reference != null && a.reference!.isNotEmpty)
+                                    Text(
+                                      a.reference!,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF6B7280),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(PosLabels.buttons.cancel),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    await _saveCustomer(
+                      id: customer.id,
+                      name: nameController.text,
+                      phone: phoneController.text,
+                    );
+                if (mounted) nav.pop();
+                  },
+                  child: Text(PosLabels.buttons.save),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    nameController.dispose();
+    phoneController.dispose();
+  }
+
+  Future<void> _showAddressDialog({
+    required int customerId,
+    CustomerAddressData? address,
+  }) async {
+    final streetController = TextEditingController(text: address?.street ?? '');
+    final neighborhoodController =
+        TextEditingController(text: address?.neighborhood ?? '');
+    final extNumberController =
+        TextEditingController(text: address?.exteriorNumber ?? '');
+    final referenceController =
+        TextEditingController(text: address?.reference ?? '');
+    final aliasController = TextEditingController(text: address?.alias ?? '');
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        final nav = Navigator.of(context);
+        return AlertDialog(
+          title: Text(address == null ? 'Nueva dirección' : 'Editar dirección'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildField(
+                    label: 'Alias',
+                    controller: aliasController,
+                    hint: 'Ej. Casa, Trabajo',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildField(
+                    label: 'Calle y número',
+                    controller: streetController,
+                    hint: 'Ej. Av. Hidalgo 123',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildField(
+                    label: 'Colonia',
+                    controller: neighborhoodController,
+                    hint: 'Ej. Centro',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildField(
+                    label: 'Número exterior',
+                    controller: extNumberController,
+                    hint: 'Ej. 123',
+                  ),
+                  const SizedBox(height: 12),
+                  _buildField(
+                    label: 'Referencia / Detalles',
+                    controller: referenceController,
+                    hint: 'Portón azul, 2do piso...',
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(PosLabels.buttons.cancel),
+            ),
+            TextButton(
+              onPressed: () async {
+                await _saveAddress(
+                  customerId: customerId,
+                  street: streetController.text,
+                  neighborhood: neighborhoodController.text,
+                  exteriorNumber: extNumberController.text,
+                  reference: referenceController.text,
+                  alias: aliasController.text,
+                );
+                if (mounted) nav.pop();
+              },
+              child: Text(PosLabels.buttons.save),
+            ),
+          ],
+        );
+      },
+    );
+
+    streetController.dispose();
+    neighborhoodController.dispose();
+    extNumberController.dispose();
+    referenceController.dispose();
+    aliasController.dispose();
   }
 
   Widget _buildField({
@@ -265,33 +641,37 @@ class _CustomersViewState extends State<CustomersView> {
                       borderRadius: BorderRadius.circular(10),
                       side: const BorderSide(color: Color(0xFFE5E7EB)),
                     ),
-                    child: ListTile(
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      title: Text(
-                        c.name,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF111827),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => _showCustomerDetailDialog(c),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 4),
+                        title: Text(
+                          c.name,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF111827),
+                          ),
                         ),
-                      ),
-                      subtitle: c.phone != null && c.phone!.isNotEmpty
-                          ? Text(
-                              c.phone!,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFF6B7280),
-                              ),
-                            )
-                          : null,
-                      trailing: IconButton(
-                        icon: const Icon(
-                          Icons.edit_outlined,
-                          size: 18,
-                          color: Color(0xFF374151),
+                        subtitle: c.phone != null && c.phone!.isNotEmpty
+                            ? Text(
+                                c.phone!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF6B7280),
+                                ),
+                              )
+                            : null,
+                        trailing: IconButton(
+                          icon: const Icon(
+                            Icons.edit_outlined,
+                            size: 18,
+                            color: Color(0xFF374151),
+                          ),
+                          onPressed: () => _showCustomerDialog(customer: c),
                         ),
-                        onPressed: () => _showCustomerDialog(customer: c),
                       ),
                     ),
                   );
