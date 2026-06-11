@@ -22,6 +22,7 @@ class TableLayoutView extends StatelessWidget {
     required this.onReprintOrder,
     required this.onAssignDeliveryDriver,
     this.onLogout,
+    this.onCustomers,
   });
 
   final List<TableInfo> tables;
@@ -33,6 +34,7 @@ class TableLayoutView extends StatelessWidget {
   final Future<void> Function(String orderId, String? driver)
       onAssignDeliveryDriver;
   final VoidCallback? onLogout;
+  final VoidCallback? onCustomers;
 
   Color _statusColor(TableStatus status) {
     switch (status) {
@@ -67,6 +69,7 @@ class TableLayoutView extends StatelessWidget {
       onReprintOrder: onReprintOrder,
       onAssignDeliveryDriver: onAssignDeliveryDriver,
       onLogout: onLogout,
+      onCustomers: onCustomers,
       statusColor: _statusColor,
       statusText: _statusText,
     );
@@ -85,6 +88,7 @@ class _TableLayoutContent extends StatefulWidget {
     required this.onLogout,
     required this.statusColor,
     required this.statusText,
+    this.onCustomers,
   });
 
   final List<TableInfo> tables;
@@ -96,6 +100,7 @@ class _TableLayoutContent extends StatefulWidget {
   final Future<void> Function(String orderId, String? driver)
       onAssignDeliveryDriver;
   final VoidCallback? onLogout;
+  final VoidCallback? onCustomers;
   final Color Function(TableStatus) statusColor;
   final String Function(TableStatus) statusText;
 
@@ -439,6 +444,7 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
         showPrinterSettingsDialog(context);
       },
       onLogout: widget.onLogout,
+      onCustomers: widget.onCustomers,
     );
   }
 

@@ -1,14 +1,21 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
+import '../../core/config/app_config.dart';
+import '../../core/platform/esc_pos_builder.dart';
 import '../../core/platform/printer_manager.dart';
 import '../../core/platform/printer_models.dart';
 import '../../core/session/app_session.dart';
+import '../../core/update/windows_updater.dart';
 import 'constants/labels.dart';
 import 'figma_mock_data.dart';
 import 'figma_models.dart';
+import 'widgets/customers_view.dart';
 import 'widgets/payment_view.dart';
 import 'widgets/pos_pin_login_view.dart';
 import 'widgets/pos_printer_preview_dialog.dart';
@@ -38,14 +45,27 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
   bool _isAuthenticating = false;
   String? _authError;
   Timer? _draftSyncTimer;
+  Timer? _refreshTimer;
+  http.Client? _ordersStreamClient;
+  StreamSubscription<String>? _ordersStreamSubscription;
+  Timer? _ordersStreamReconnectTimer;
+  bool _ordersStreamConnected = false;
+  bool _shouldKeepOrdersStream = false;
+  bool _ordersReloadQueued = false;
+  String? _pendingSseEvent;
+  final StringBuffer _pendingSseData = StringBuffer();
   bool _isLoadingRemoteOrders = false;
   bool _isLoadingBranches = true;
   List<Map<String, dynamic>> _branches = [];
+  bool _didCheckWindowsUpdate = false;
 
   @override
   void initState() {
     super.initState();
     _loadBranches();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkWindowsUpdate();
+    });
   }
 
   Future<void> _loadBranches() async {
@@ -71,7 +91,130 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
   @override
   void dispose() {
     _draftSyncTimer?.cancel();
+    _refreshTimer?.cancel();
+    _stopOrdersStream();
     super.dispose();
+  }
+
+  Future<void> _checkWindowsUpdate() async {
+    if (_didCheckWindowsUpdate) return;
+    _didCheckWindowsUpdate = true;
+
+    final updater = WindowsUpdater(_session.apiClient);
+    final info = await updater.checkForUpdate();
+    if (!mounted || info == null || !info.hasUpdate) return;
+
+    await _showWindowsUpdateDialog(info, updater);
+  }
+
+  Future<void> _showWindowsUpdateDialog(
+    WindowsUpdateInfo info,
+    WindowsUpdater updater,
+  ) async {
+    var downloading = false;
+    var progress = 0.0;
+    String? error;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: !info.mandatory,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            Future<void> startUpdate() async {
+              if (downloading) return;
+              setStateDialog(() {
+                downloading = true;
+                progress = 0;
+                error = null;
+              });
+              try {
+                final file = await updater.downloadInstaller(
+                  info,
+                  onProgress: (value) {
+                    setStateDialog(() => progress = value);
+                  },
+                );
+                await updater.runInstallerSilent(file);
+                if (!mounted) return;
+                if (!dialogContext.mounted) return;
+                Navigator.of(dialogContext).pop();
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Actualización iniciada. La app se cerrará.'),
+                  ),
+                );
+                await Future<void>.delayed(const Duration(milliseconds: 700));
+                exit(0);
+              } catch (e) {
+                setStateDialog(() {
+                  downloading = false;
+                  error = '$e';
+                });
+              }
+            }
+
+            return AlertDialog(
+              title: Text('Actualización disponible (${info.latestVersion})'),
+              content: SizedBox(
+                width: 460,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Versión actual: ${WindowsUpdater.appVersion}'),
+                    const SizedBox(height: 6),
+                    Text('Nueva versión: ${info.latestVersion}'),
+                    if (info.releaseNotes.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Notas de la actualización',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(info.releaseNotes),
+                    ],
+                    if (downloading) ...[
+                      const SizedBox(height: 14),
+                      LinearProgressIndicator(
+                        value: progress > 0 ? progress : null,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        progress > 0
+                            ? 'Descargando ${(progress * 100).toStringAsFixed(0)}%'
+                            : 'Descargando...',
+                      ),
+                    ],
+                    if (error != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'Error: $error',
+                        style: const TextStyle(color: Color(0xFFB91C1C)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                if (!info.mandatory)
+                  TextButton(
+                    onPressed: downloading
+                        ? null
+                        : () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Después'),
+                  ),
+                FilledButton.icon(
+                  onPressed: downloading ? null : startUpdate,
+                  icon: const Icon(Icons.system_update_alt),
+                  label: Text(downloading ? 'Descargando...' : 'Actualizar ahora'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   AppOrder? get _activeOrder {
@@ -188,8 +331,13 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     });
   }
 
+  void _goToCustomers() {
+    setState(() => _currentView = PosView.customers);
+  }
+
   void _handleLogout() {
     _draftSyncTimer?.cancel();
+    _stopOrdersStream();
     setState(() {
       _session.clear();
       _authError = null;
@@ -224,6 +372,16 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     });
   }
 
+  void _startPeriodicRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (_session.isAuthenticated) {
+        if (_ordersStreamConnected) return;
+        _loadOrdersFromBackend();
+      }
+    });
+  }
+
   Future<void> _loadOrdersFromBackend() async {
     if (!_session.isAuthenticated || _isLoadingRemoteOrders) return;
 
@@ -241,6 +399,11 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
       final rows = (response['data'] as List? ?? const []);
       final loadedOrders = <AppOrder>[];
       final remoteIds = <String, int>{};
+      final localDraftOrders = _orders
+          .where((order) =>
+              !_remoteOrderIds.containsKey(order.id) && order.status.isActive)
+          .toList(growable: false);
+      final activeOrderIdBeforeReload = _activeOrderId;
 
       int maxTicket = _ticketCounter;
       int maxOrder = _orderCounter;
@@ -270,15 +433,41 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
         }
       }
 
+      final mergedOrders = <AppOrder>[
+        ...loadedOrders,
+        ...localDraftOrders.where((local) =>
+            !loadedOrders.any((remote) => remote.id == local.id)),
+      ];
+
+      String? nextActiveOrderId = activeOrderIdBeforeReload;
+      if (nextActiveOrderId != null &&
+          !mergedOrders.any((order) => order.id == nextActiveOrderId)) {
+        final mappedRemoteId = _remoteOrderIds[nextActiveOrderId];
+        if (mappedRemoteId != null && mappedRemoteId > 0) {
+          final remoteOrderId = 'remote-$mappedRemoteId';
+          if (mergedOrders.any((order) => order.id == remoteOrderId)) {
+            nextActiveOrderId = remoteOrderId;
+          }
+        }
+      }
+
       if (!mounted) return;
 
       setState(() {
-        _orders = loadedOrders;
+        _orders = mergedOrders;
         _remoteOrderIds
           ..clear()
           ..addAll(remoteIds);
         _ticketCounter = maxTicket;
         _orderCounter = maxOrder;
+        _activeOrderId = nextActiveOrderId;
+        final hasActiveOrder = _activeOrderId != null &&
+            _orders.any((order) => order.id == _activeOrderId);
+        if (!hasActiveOrder &&
+            (_currentView == PosView.pos || _currentView == PosView.payment)) {
+          _currentView = PosView.tables;
+          _activeOrderId = null;
+        }
         _isLoadingRemoteOrders = false;
       });
     } catch (error) {
@@ -313,7 +502,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     final driverName = '${data['repartidor_nombre_completo'] ?? ''}'.trim();
     final cashierName = '${data['cajero_nombre_completo'] ?? ''}'.trim();
 
-    final mesaLabel = '${payloadSummary['mesa_label'] ?? ''}'.trim();
+    final mesaLabel = _resolveMesaLabel(data, payloadSummary);
     final apiFolio = '${data['folio'] ?? ''}'.trim();
     final fallbackTicket = '#${remoteId.toString().padLeft(5, '0')}';
     final ticketNumber =
@@ -430,8 +619,27 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     if (normalized == 'delivery' || normalized == 'domicilio') {
       return 'Delivery';
     }
-    if (normalized == 'mesa') return 'Dine In';
+    if (normalized == 'mesa' || normalized == 'comedor') return 'Dine In';
     return 'To Go';
+  }
+
+  String _resolveMesaLabel(
+    Map<String, dynamic> data,
+    Map<String, dynamic> payloadSummary,
+  ) {
+    final payloadLabel = '${payloadSummary['mesa_label'] ?? ''}'.trim();
+    if (payloadLabel.isNotEmpty) return payloadLabel;
+
+    final mesaId = _toInt(data['mesa_id']);
+    if (mesaId <= 0) return '';
+
+    for (final table in _baseTables) {
+      if (_toInt(table.id) == mesaId) {
+        return table.number;
+      }
+    }
+
+    return '';
   }
 
   AppOrderStatus _mapApiStatus({
@@ -514,9 +722,6 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
       paymentBalance: paymentData.balance,
       completedAt: DateTime.now(),
     );
-    final receiptText =
-        _buildCustomerReceiptText(order: completedOrder, isReprint: false);
-
     setState(() {
       _upsertOrder(completedOrder);
       _currentView = PosView.tables;
@@ -525,7 +730,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     });
 
     if (paymentData.printTicket) {
-      await _printCustomerReceipt(receiptText);
+      await _printCustomerReceipt(order: completedOrder, isReprint: false);
     }
   }
 
@@ -624,6 +829,8 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     await _loadPaymentMethods();
     await _loadDeliveryDrivers();
     await _loadOrdersFromBackend();
+    await _startOrdersStream();
+    _startPeriodicRefresh();
   }
 
   Future<void> _handleLoginWithPin(String pin, int branchId) async {
@@ -771,16 +978,19 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     final promoDiscount =
         pricing.promoAdjustment < 0 ? pricing.promoAdjustment.abs() : 0.0;
 
+    final mesaLabelForApi = _mesaLabelForApi(order);
+
     final payload = <String, dynamic>{
       'tipo_pedido': _mapOrderTypeForApi(order),
       'canal_origen': 'pos_flutter',
-      'observaciones':
-          order.deliveryNotes ?? 'POS ticket ${order.ticketNumber}',
+      if (order.deliveryNotes != null &&
+          order.deliveryNotes!.trim().isNotEmpty)
+        'observaciones': order.deliveryNotes!.trim(),
       'promociones_total': promoDiscount,
       'items': order.items.map(_mapOrderItemToApi).toList(growable: false),
       'ticket_number': order.ticketNumber,
       'customer_or_table': order.customerOrTable,
-      if (order.tableNumber != null) 'mesa_label': order.tableNumber,
+      if (mesaLabelForApi != null) 'mesa_label': mesaLabelForApi,
       if (customerRef.customerId > 0) 'cliente_id': customerRef.customerId,
       if (customerRef.addressId > 0)
         'direccion_cliente_id': customerRef.addressId,
@@ -877,6 +1087,8 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
         'direccion_lat': order.deliveryAddressLatitude,
       if (isDelivery && order.deliveryAddressLongitude != null)
         'direccion_lng': order.deliveryAddressLongitude,
+      if (isDelivery && order.deliveryShippingCost > 0)
+        'costo_envio': order.deliveryShippingCost,
       if (isDelivery && (order.deliveryNotes ?? '').trim().isNotEmpty)
         'referencia': order.deliveryNotes!.trim(),
       if (isDelivery && (order.customerAddressId ?? 0) > 0)
@@ -970,8 +1182,145 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
 
   String _mapOrderTypeForApi(AppOrder order) {
     if (order.tableNumber != null) return 'mesa';
+    if (order.orderType == 'Dine In') return 'mesa';
     if (order.orderType == 'Delivery') return 'delivery';
     return 'recoger';
+  }
+
+  String? _mesaLabelForApi(AppOrder order) {
+    final tableNumber = order.tableNumber?.trim();
+    if (tableNumber != null && tableNumber.isNotEmpty) {
+      return tableNumber;
+    }
+
+    if (order.orderType != 'Dine In') {
+      return null;
+    }
+
+    final customerOrTable = order.customerOrTable.trim();
+    if (customerOrTable.toLowerCase().startsWith('mesa ')) {
+      final parsed = customerOrTable.substring(5).trim();
+      if (parsed.isNotEmpty) {
+        return parsed;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _startOrdersStream() async {
+    _stopOrdersStream(keepAlive: true);
+
+    if (!_session.isAuthenticated) return;
+    final token = _session.apiClient.token;
+    final branchId = _session.apiClient.branchId ?? _session.branchId;
+    if (token == null || token.trim().isEmpty || branchId <= 0) return;
+
+    _shouldKeepOrdersStream = true;
+    final client = http.Client();
+    _ordersStreamClient = client;
+
+    try {
+      final request = http.Request(
+        'GET',
+        Uri.parse('${AppConfig.apiUrl}/orders/stream'),
+      );
+      request.headers['Accept'] = 'text/event-stream';
+      request.headers['Authorization'] = 'Bearer $token';
+      request.headers['X-Branch-Id'] = '$branchId';
+
+      final response = await client.send(request);
+      if (response.statusCode != 200) {
+        throw Exception('SSE status ${response.statusCode}');
+      }
+
+      _ordersStreamConnected = true;
+      _pendingSseEvent = null;
+      _pendingSseData.clear();
+
+      _ordersStreamSubscription = response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .listen(
+        _handleSseLine,
+        onError: (_) => _handleOrdersStreamDisconnected(),
+        onDone: _handleOrdersStreamDisconnected,
+        cancelOnError: true,
+      );
+    } catch (_) {
+      _ordersStreamConnected = false;
+      _scheduleOrdersStreamReconnect();
+    }
+  }
+
+  void _handleSseLine(String line) {
+    if (line.isEmpty) {
+      final event = (_pendingSseEvent ?? 'message').trim().toLowerCase();
+      _pendingSseEvent = null;
+      _pendingSseData.clear();
+
+      if (event == 'orders_changed') {
+        _queueOrdersReloadFromSse();
+      }
+      return;
+    }
+
+    if (line.startsWith('event:')) {
+      _pendingSseEvent = line.substring(6).trim();
+      return;
+    }
+
+    if (line.startsWith('data:')) {
+      if (_pendingSseData.isNotEmpty) {
+        _pendingSseData.write('\n');
+      }
+      _pendingSseData.write(line.substring(5).trimLeft());
+    }
+  }
+
+  void _queueOrdersReloadFromSse() {
+    if (_ordersReloadQueued) return;
+    _ordersReloadQueued = true;
+    Future<void>.delayed(const Duration(milliseconds: 250), () async {
+      try {
+        if (_session.isAuthenticated) {
+          await _loadOrdersFromBackend();
+        }
+      } finally {
+        _ordersReloadQueued = false;
+      }
+    });
+  }
+
+  void _handleOrdersStreamDisconnected() {
+    _ordersStreamConnected = false;
+    _ordersStreamSubscription?.cancel();
+    _ordersStreamSubscription = null;
+    _ordersStreamClient?.close();
+    _ordersStreamClient = null;
+    _scheduleOrdersStreamReconnect();
+  }
+
+  void _scheduleOrdersStreamReconnect() {
+    if (!_shouldKeepOrdersStream) return;
+    _ordersStreamReconnectTimer?.cancel();
+    _ordersStreamReconnectTimer = Timer(const Duration(seconds: 2), () async {
+      if (!_shouldKeepOrdersStream || !_session.isAuthenticated) return;
+      await _startOrdersStream();
+    });
+  }
+
+  void _stopOrdersStream({bool keepAlive = false}) {
+    _shouldKeepOrdersStream = keepAlive;
+    _ordersStreamReconnectTimer?.cancel();
+    _ordersStreamReconnectTimer = null;
+    _ordersStreamConnected = false;
+    _ordersStreamSubscription?.cancel();
+    _ordersStreamSubscription = null;
+    _ordersStreamClient?.close();
+    _ordersStreamClient = null;
+    _pendingSseEvent = null;
+    _pendingSseData.clear();
   }
 
   Map<String, dynamic> _mapOrderItemToApi(OrderItemData item) {
@@ -1027,6 +1376,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
         'crustHalf1': c.crustHalf1,
         'crustHalf2': c.crustHalf2,
         'includePromoGarlicBread': c.includePromoGarlicBread,
+        'promoPizzaMediana': c.promoPizzaMediana,
       };
     }
     if (item.hamburgerConfig != null) {
@@ -1096,10 +1446,14 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     return RegExp(r'^#\d{5,}$').hasMatch(value.trim());
   }
 
-  Future<void> _printCustomerReceipt(String receiptText) async {
+  Future<void> _printCustomerReceipt({
+    required AppOrder order,
+    required bool isReprint,
+  }) async {
     try {
       final printer = PrinterManager.instance.resolvePrinter(PrinterDestination.customerReceipt);
       if (printer != null && printer.driver == PrinterDriver.pdf) {
+        final receiptText = _buildCustomerReceiptText(order: order, isReprint: isReprint);
         if (!mounted) return;
         await showPrinterPreviewDialog(
           context,
@@ -1108,9 +1462,10 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
         );
         return;
       }
-      await PrinterManager.instance.printTicket(
+      final bytes = _buildCustomerReceiptEscPos(order: order, isReprint: isReprint);
+      await PrinterManager.instance.printEscPosTicket(
         destination: PrinterDestination.customerReceipt,
-        text: receiptText,
+        bytes: bytes,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1126,9 +1481,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
   }
 
   Future<void> _handleReprintCompletedOrder(AppOrder order) async {
-    final receiptText =
-        _buildCustomerReceiptText(order: order, isReprint: true);
-    await _printCustomerReceipt(receiptText);
+    await _printCustomerReceipt(order: order, isReprint: true);
   }
 
   String _buildCustomerReceiptText({
@@ -1286,6 +1639,9 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     final now = (order.completedAt ?? DateTime.now()).toLocal();
     final buffer = StringBuffer();
     buffer.writeln(center('Rons Pizza'));
+    buffer.writeln(center('RFC ROGS5400720P64'));
+    buffer.writeln(center('CJON SONORA Y CALLE 7'));
+    buffer.writeln(center('TEL. 6536544050 - 6535346311'));
     if (isReprint) {
       buffer.writeln(center('*** ${PosLabels.ticket.reprint} ***'));
     }
@@ -1412,6 +1768,86 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     return buffer.toString().trimRight();
   }
 
+  /// Genera ticket de venta en bytes ESC/POS con header grande, negritas
+  /// y corte limpio. Reutiliza la lógica de `_buildCustomerReceiptText`.
+  Uint8List _buildCustomerReceiptEscPos({
+    required AppOrder order,
+    required bool isReprint,
+  }) {
+    final plainText = _buildCustomerReceiptText(order: order, isReprint: isReprint);
+    final lines = plainText.split('\n');
+    final b = EscPosBuilder()
+      ..init()
+      // Compensa impresoras que imprimen ligeramente cargado hacia la izquierda.
+      ..leftMargin(12);
+
+    for (final rawLine in lines) {
+      final line = rawLine.trimRight();
+      final trimmed = line.trim();
+
+      final isHeaderCenterLine = trimmed == 'Rons Pizza' ||
+          trimmed == 'RONS PIZZA' ||
+          trimmed.startsWith('RFC ') ||
+          trimmed.startsWith('CJON ') ||
+          trimmed.startsWith('TE. ');
+
+      if (isHeaderCenterLine) {
+        b
+          ..alignCenter()
+          ..boldOn();
+        if (trimmed == 'Rons Pizza' || trimmed == 'RONS PIZZA') {
+          b
+            ..doubleHeightOn()
+            ..line(trimmed)
+            ..doubleHeightOff();
+        } else {
+          b.line(trimmed);
+        }
+        b
+          ..boldOff()
+          ..alignLeft();
+        continue;
+      }
+
+      if (isReprint && trimmed.toUpperCase().contains('REIMPRESION')) {
+        b
+          ..alignCenter()
+          ..boldOn()
+          ..line(trimmed)
+          ..boldOff()
+          ..alignLeft();
+        continue;
+      }
+
+      if (trimmed.toUpperCase().startsWith('GRACIAS')) {
+        b
+          ..alignCenter()
+          ..line(trimmed)
+          ..alignLeft();
+        continue;
+      }
+
+      final upper = trimmed.toUpperCase();
+      final isBoldLine = upper.startsWith('TOTAL') ||
+          upper.startsWith('EFECTIVO') ||
+          upper.startsWith('DOLAR') ||
+          upper.startsWith('TARJETA') ||
+          upper.startsWith('CAMBIO') ||
+          upper.startsWith('RESTANTE') ||
+          upper.startsWith('ENVIO') ||
+          upper.startsWith('PROMO');
+      if (isBoldLine) {
+        b.boldOn().line(line).boldOff();
+      } else {
+        b.line(line);
+      }
+    }
+
+    b.emptyLine().emptyLine().feed(4).cut();
+
+    return b.build();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_session.isAuthenticated) {
@@ -1434,6 +1870,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           onReprintOrder: _handleReprintCompletedOrder,
           onAssignDeliveryDriver: _handleAssignDeliveryDriver,
           onLogout: _handleLogout,
+          onCustomers: _goToCustomers,
         );
       case PosView.pos:
         if (_activeOrder == null) {
@@ -1448,6 +1885,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           onSaveCustomer: _saveCustomerFromPos,
           onProceedToPayment: _handleProceedToPayment,
           onLogout: _handleLogout,
+          onCustomers: _goToCustomers,
         );
       case PosView.payment:
         if (_activeOrder == null) {
@@ -1470,6 +1908,11 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           onCancel: _handlePaymentCancel,
           onComplete: _handlePaymentComplete,
           onCloseWithoutPayment: _handleCloseWithoutPayment,
+        );
+      case PosView.customers:
+        return CustomersView(
+          apiClient: _session.apiClient,
+          onBack: _handleBackToTables,
         );
     }
   }

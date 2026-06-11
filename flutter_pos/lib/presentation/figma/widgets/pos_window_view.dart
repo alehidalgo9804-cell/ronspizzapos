@@ -37,6 +37,7 @@ class PosWindowView extends StatefulWidget {
     required this.onProceedToPayment,
     required this.onSaveCustomer,
     this.onLogout,
+    this.onCustomers,
   });
 
   final AppOrder order;
@@ -45,6 +46,7 @@ class PosWindowView extends StatefulWidget {
   final ValueChanged<AppOrder> onProceedToPayment;
   final Future<Map<String, int>> Function(AppOrder order) onSaveCustomer;
   final VoidCallback? onLogout;
+  final VoidCallback? onCustomers;
 
   @override
   State<PosWindowView> createState() => _PosWindowViewState();
@@ -2035,6 +2037,7 @@ class _PosWindowViewState extends State<PosWindowView> {
         showPrinterSettingsDialog(context);
       },
       onLogout: widget.onLogout,
+      onCustomers: widget.onCustomers,
     );
   }
 

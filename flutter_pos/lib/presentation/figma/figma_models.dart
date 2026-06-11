@@ -1,4 +1,4 @@
-enum PosView { tables, pos, payment }
+enum PosView { tables, pos, payment, customers }
 
 enum TableStatus { available, occupied, awaitingPayment }
 
@@ -130,6 +130,7 @@ class OrderItemData {
     this.saladConfig,
     this.spaghettiConfig,
     this.garlicBreadConfig,
+    this.sentToKitchen = false,
   });
 
   final String id;
@@ -145,6 +146,7 @@ class OrderItemData {
   final SaladConfigData? saladConfig;
   final SpaghettiConfigData? spaghettiConfig;
   final GarlicBreadConfigData? garlicBreadConfig;
+  final bool sentToKitchen;
 
   OrderItemData copyWith({
     String? id,
@@ -161,6 +163,7 @@ class OrderItemData {
     SaladConfigData? saladConfig,
     SpaghettiConfigData? spaghettiConfig,
     GarlicBreadConfigData? garlicBreadConfig,
+    bool? sentToKitchen,
   }) {
     return OrderItemData(
       id: id ?? this.id,
@@ -176,6 +179,7 @@ class OrderItemData {
       saladConfig: saladConfig ?? this.saladConfig,
       spaghettiConfig: spaghettiConfig ?? this.spaghettiConfig,
       garlicBreadConfig: garlicBreadConfig ?? this.garlicBreadConfig,
+      sentToKitchen: sentToKitchen ?? this.sentToKitchen,
     );
   }
 }
@@ -201,6 +205,7 @@ class PizzaConfigData {
     this.crustHalf1,
     this.crustHalf2,
     this.includePromoGarlicBread = false,
+    this.promoPizzaMediana = false,
   });
 
   final String specialty;
@@ -222,6 +227,7 @@ class PizzaConfigData {
   final String? crustHalf1;
   final String? crustHalf2;
   final bool includePromoGarlicBread;
+  final bool promoPizzaMediana;
 }
 
 class HamburgerUnitConfigData {
@@ -541,6 +547,7 @@ OrderPricingSummary calculateOrderPricing(List<OrderItemData> items) {
   for (final item in items) {
     final config = item.pizzaConfig;
     if (config == null) continue;
+    if (config.promoPizzaMediana) continue;
     if (!_equalsNormalized(config.size, 'Mediana')) continue;
     for (var i = 0; i < item.quantity; i++) {
       mediumPizzas.add(_PizzaPromoUnit(item: item, config: config));
@@ -700,4 +707,46 @@ class _PromoComputation {
 
   final double totalDiscount;
   final int pairCount;
+}
+
+class CustomerData {
+  const CustomerData({
+    required this.id,
+    required this.name,
+    this.phone,
+    this.phoneAlt,
+    this.email,
+    this.notes,
+    this.active = true,
+  });
+
+  factory CustomerData.fromJson(Map<String, dynamic> json) {
+    return CustomerData(
+      id: json['id'] as int? ?? 0,
+      name: json['nombre'] as String? ?? '',
+      phone: json['telefono'] as String?,
+      phoneAlt: json['telefono_alterno'] as String?,
+      email: json['email'] as String?,
+      notes: json['notas'] as String?,
+      active: (json['activo'] as int? ?? 1) == 1,
+    );
+  }
+
+  final int id;
+  final String name;
+  final String? phone;
+  final String? phoneAlt;
+  final String? email;
+  final String? notes;
+  final bool active;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'nombre': name,
+      if (phone != null && phone!.isNotEmpty) 'telefono': phone,
+      if (phoneAlt != null && phoneAlt!.isNotEmpty) 'telefono_alterno': phoneAlt,
+      if (email != null && email!.isNotEmpty) 'email': email,
+      if (notes != null && notes!.isNotEmpty) 'notas': notes,
+    };
+  }
 }
