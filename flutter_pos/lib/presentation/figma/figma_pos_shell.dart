@@ -20,6 +20,7 @@ import 'widgets/payment_view.dart';
 import 'widgets/pos_pin_login_view.dart';
 import 'widgets/pos_printer_preview_dialog.dart';
 import 'widgets/pos_window_view.dart';
+import 'widgets/pos_users_view.dart';
 import 'widgets/table_layout_view.dart';
 
 class FigmaPosShell extends StatefulWidget {
@@ -335,6 +336,10 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     setState(() => _currentView = PosView.customers);
   }
 
+  void _goToUsers() {
+    setState(() => _currentView = PosView.users);
+  }
+
   void _handleLogout() {
     _draftSyncTimer?.cancel();
     _stopOrdersStream();
@@ -479,6 +484,44 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     }
   }
 
+  Map<String, dynamic> _resolveGuestsFromPayload(
+    Map<String, dynamic> payloadSummary,
+    List<OrderItemData> items,
+  ) {
+    final List<GuestData> guests = [];
+    final rawGuests = payloadSummary['guests'];
+    if (rawGuests is List && rawGuests.isNotEmpty) {
+      for (final entry in rawGuests) {
+        if (entry is Map<String, dynamic>) {
+          final id = _toInt(entry['id'], fallback: 0);
+          if (id > 0) {
+            var name = '${entry['name'] ?? ''}'.trim();
+            if (name.isEmpty) name = 'Cliente $id';
+            guests.add(GuestData(id: id, name: name));
+          }
+        }
+      }
+    }
+
+    if (guests.isEmpty) {
+      final ids = items.map((i) => i.guestId).where((id) => id > 0).toSet().toList()
+        ..sort();
+      if (ids.isEmpty) ids.add(1);
+      guests.addAll(ids.map((id) => GuestData(id: id, name: 'Cliente $id')));
+    }
+
+    final currentGuestId = _toInt(payloadSummary['current_guest_id'], fallback: 0);
+    final effectiveCurrentGuestId =
+        currentGuestId > 0 && guests.any((g) => g.id == currentGuestId)
+            ? currentGuestId
+            : guests.first.id;
+
+    return <String, dynamic>{
+      'guests': guests,
+      'currentGuestId': effectiveCurrentGuestId,
+    };
+  }
+
   AppOrder _mapApiOrder(Map<String, dynamic> data) {
     final payloadSummary =
         (data['payload_resumen_json'] as Map?)?.cast<String, dynamic>() ??
@@ -514,6 +557,8 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
         .map((item) => _mapApiOrderItem((item as Map).cast<String, dynamic>()))
         .toList(growable: false);
 
+    final guestResolution = _resolveGuestsFromPayload(payloadSummary, items);
+
     return AppOrder(
       id: 'remote-$remoteId',
       orderNumber: orderNumber.isEmpty ? 'ORD-$remoteId' : orderNumber,
@@ -530,8 +575,8 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
                       : PosLabels.common.dineIn)),
       createdAt: createdAt,
       status: status,
-      guests: const [GuestData(id: 1, name: 'Invitado 1')],
-      currentGuestId: 1,
+      guests: guestResolution['guests'] as List<GuestData>,
+      currentGuestId: guestResolution['currentGuestId'] as int,
       items: items,
       customerName: customerName.isEmpty ? null : customerName,
       customerPhone: customerPhone.isEmpty ? null : customerPhone,
@@ -552,6 +597,11 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
       cashierName: cashierName.isEmpty ? null : cashierName,
       paymentPaidAmount: _toNullableDouble(data['total_pagado']),
       paymentBalance: _toNullableDouble(data['total_pendiente']),
+      paymentCashAmount: _toNullableDouble(data['payment_cash_amount']),
+      paymentUsdAmount: _toNullableDouble(data['payment_usd_amount']),
+      paymentCardAmount: _toNullableDouble(data['payment_card_amount']),
+      paymentUsdExchangeRate:
+          _toNullableDouble(data['payment_usd_exchange_rate']),
       closeReason: _stringOrNull(data['cierre_sin_pago_motivo']),
       completedAt: completedAt,
       tableNumber: mesaLabel.isEmpty ? null : mesaLabel,
@@ -570,7 +620,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
       price: _toDouble(data['precio_unitario']),
       categoryId: category,
       quantity: qty <= 0 ? 1 : qty,
-      guestId: 1,
+      guestId: _toInt(data['guest_id'], fallback: 1),
       comment: _stringOrNull(data['notas']),
     );
   }
@@ -980,6 +1030,14 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
 
     final mesaLabelForApi = _mesaLabelForApi(order);
 
+    final guestsPayload = order.guests.isNotEmpty
+        ? order.guests
+            .map((g) => <String, dynamic>{'id': g.id, 'name': g.name})
+            .toList(growable: false)
+        : <Map<String, dynamic>>[
+            {'id': 1, 'name': 'Cliente 1'},
+          ];
+
     final payload = <String, dynamic>{
       'tipo_pedido': _mapOrderTypeForApi(order),
       'canal_origen': 'pos_flutter',
@@ -990,6 +1048,8 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
       'items': order.items.map(_mapOrderItemToApi).toList(growable: false),
       'ticket_number': order.ticketNumber,
       'customer_or_table': order.customerOrTable,
+      'guests': guestsPayload,
+      'current_guest_id': order.currentGuestId,
       if (mesaLabelForApi != null) 'mesa_label': mesaLabelForApi,
       if (customerRef.customerId > 0) 'cliente_id': customerRef.customerId,
       if (customerRef.addressId > 0)
@@ -1089,8 +1149,6 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
         'direccion_lng': order.deliveryAddressLongitude,
       if (isDelivery && order.deliveryShippingCost > 0)
         'costo_envio': order.deliveryShippingCost,
-      if (isDelivery && (order.deliveryNotes ?? '').trim().isNotEmpty)
-        'referencia': order.deliveryNotes!.trim(),
       if (isDelivery && (order.customerAddressId ?? 0) > 0)
         'direccion_cliente_id': order.customerAddressId,
     };
@@ -1334,6 +1392,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
       'cantidad': item.quantity,
       'precio_unitario': item.price,
       'notas': item.comment,
+      'guest_id': item.guestId,
       'config_builder_tipo': _builderTypeForItem(item),
       'config_builder_json': _builderConfigToMap(item),
       'display_lines_json': <String>[
@@ -1714,7 +1773,9 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     final usd = order.paymentUsdAmount ?? 0;
     final usdExchangeRate = order.paymentUsdExchangeRate ?? 0;
     final card = order.paymentCardAmount ?? 0;
-    final balance = order.paymentBalance ?? 0;
+    final paid = order.paymentPaidAmount ?? 0;
+    final change = paid > orderTotal ? paid - orderTotal : 0.0;
+    final remaining = paid < orderTotal ? orderTotal - paid : 0.0;
     if (pricing.promoApplied && pricing.promoLabel != null) {
       final sign = pricing.promoAdjustment >= 0 ? '+' : '-';
       buffer.writeln(
@@ -1751,15 +1812,15 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
       '${padOrTrim(PosLabels.ticket.card, lineWidth - moneyWidth - 1)} '
       '${padOrTrim(money(card), moneyWidth, left: true)}',
     );
-    if (balance >= 0) {
+    if (change > 0) {
       buffer.writeln(
         '${padOrTrim(PosLabels.ticket.change, lineWidth - moneyWidth - 1)} '
-        '${padOrTrim(money(balance), moneyWidth, left: true)}',
+        '${padOrTrim(money(change), moneyWidth, left: true)}',
       );
-    } else {
+    } else if (remaining > 0) {
       buffer.writeln(
         '${padOrTrim(PosLabels.ticket.remaining, lineWidth - moneyWidth - 1)} '
-        '${padOrTrim(money(balance.abs()), moneyWidth, left: true)}',
+        '${padOrTrim(money(remaining), moneyWidth, left: true)}',
       );
     }
     buffer.writeln(divider());
@@ -1778,8 +1839,9 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     final lines = plainText.split('\n');
     final b = EscPosBuilder()
       ..init()
-      // Compensa impresoras que imprimen ligeramente cargado hacia la izquierda.
-      ..leftMargin(12);
+      ..selectFontA()
+      // Maximiza el ancho útil; el texto ya está formateado al ancho configurado.
+      ..leftMargin(0);
 
     for (final rawLine in lines) {
       final line = rawLine.trimRight();
@@ -1789,7 +1851,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           trimmed == 'RONS PIZZA' ||
           trimmed.startsWith('RFC ') ||
           trimmed.startsWith('CJON ') ||
-          trimmed.startsWith('TE. ');
+          trimmed.startsWith('TEL. ');
 
       if (isHeaderCenterLine) {
         b
@@ -1871,6 +1933,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           onAssignDeliveryDriver: _handleAssignDeliveryDriver,
           onLogout: _handleLogout,
           onCustomers: _goToCustomers,
+          onUsers: _goToUsers,
         );
       case PosView.pos:
         if (_activeOrder == null) {
@@ -1886,6 +1949,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           onProceedToPayment: _handleProceedToPayment,
           onLogout: _handleLogout,
           onCustomers: _goToCustomers,
+          onUsers: _goToUsers,
         );
       case PosView.payment:
         if (_activeOrder == null) {
@@ -1905,6 +1969,9 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           tableNumber: paymentLabel,
           orderTotal: paymentTotal,
           orderItems: _activeOrder!.items,
+          guests: _activeOrder!.guests.isNotEmpty
+              ? _activeOrder!.guests
+              : const [GuestData(id: 1, name: 'Cliente 1')],
           onCancel: _handlePaymentCancel,
           onComplete: _handlePaymentComplete,
           onCloseWithoutPayment: _handleCloseWithoutPayment,
@@ -1913,6 +1980,17 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
         return CustomersView(
           apiClient: _session.apiClient,
           onBack: _handleBackToTables,
+        );
+      case PosView.users:
+        return PosUsersView(
+          apiClient: _session.apiClient,
+          onBack: _handleBackToTables,
+        );
+      case PosView.branches:
+        return Scaffold(
+          body: Center(
+            child: Text('Sucursales'),
+          ),
         );
     }
   }
