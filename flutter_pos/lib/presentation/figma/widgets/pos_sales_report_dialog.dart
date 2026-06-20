@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
+import '../../../core/platform/esc_pos_builder.dart';
 import '../../../core/platform/printer_manager.dart';
 import '../../../core/platform/printer_models.dart';
 import '../../../core/session/app_session.dart';
@@ -93,46 +96,50 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
   }
 
   Future<void> _loadCashiers() async {
-    setState(() => _isLoadingCashiers = true);
+    setState(() {
+      _isLoadingCashiers = true;
+      _errorMessage = null;
+    });
     final options = <_CashierOption>[];
-    final employeesResponse = await _session.apiClient.get('/employees?limit=500');
-    if (employeesResponse['success'] == true) {
-      final employees = (employeesResponse['data'] as List?) ?? const [];
-      for (final row in employees) {
-        final map = (row as Map?)?.cast<String, dynamic>();
-        if (map == null) continue;
-        final isActive = _toInt(map['activo'], fallback: 1) == 1;
-        final pinCaja = '${map['pin_caja'] ?? ''}'.trim();
-        if (!isActive || pinCaja.isEmpty) continue;
-        final id = _toInt(map['usuario_id']);
-        final nombre = '${map['nombre'] ?? ''}'.trim();
-        final apellidos = '${map['apellidos'] ?? ''}'.trim();
-        final fullName = '$nombre $apellidos'.trim();
-        if (id > 0 && fullName.isNotEmpty) {
-          options.add(_CashierOption(id: id, name: fullName));
+    String? loadError;
+
+    // El selector debe mostrar exactamente los usuarios activos con rol
+    // admin o cajero (los mismos que se ven en el apartado Usuarios).
+    // /pos-cashiers usa el mismo servicio que /admin-usuarios, pero esta
+    // disponible para cualquier usuario autenticado (incluidos cajeros).
+    try {
+      final usersResponse = await _session.apiClient.get('/pos-cashiers');
+      if (usersResponse['success'] == true) {
+        final users = (usersResponse['data'] as List?) ?? const [];
+        for (final row in users) {
+          final map = (row as Map?)?.cast<String, dynamic>();
+          if (map == null) continue;
+          final isActive = _toInt(map['activo'], fallback: 1) == 1;
+          if (!isActive) continue;
+          final id = _toInt(map['id']);
+          final nombre = '${map['nombre'] ?? ''}'.trim();
+          final apellido = '${map['apellido'] ?? ''}'.trim();
+          final fullName = '$nombre $apellido'.trim();
+          if (id > 0 && fullName.isNotEmpty) {
+            options.add(_CashierOption(id: id, name: fullName));
+          }
         }
+      } else {
+        loadError = usersResponse['message']?.toString();
+      }
+    } catch (e) {
+      loadError = 'Error al cargar cajeros: $e';
+    }
+
+    // Solo si no hay usuarios configurados, incluir al usuario actual para
+    // permitir generar un reporte filtrado por lo menos por el mismo.
+    if (options.isEmpty && (_session.userId ?? 0) > 0) {
+      final currentName = (_session.userName ?? '').trim();
+      if (currentName.isNotEmpty) {
+        options.add(_CashierOption(id: _session.userId!, name: currentName));
       }
     }
 
-    if (options.isEmpty) {
-      final response = await _session.apiClient.get('/reportes/recibos?page=1&per_page=1');
-      if (response['success'] == true) {
-        final data =
-            (response['data'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
-        final filters =
-            (data['filters'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
-        final meseros = (filters['meseros'] as List?) ?? const [];
-        for (final row in meseros) {
-          final map = (row as Map?)?.cast<String, dynamic>();
-          if (map == null) continue;
-          final id = _toInt(map['id']);
-          final name = '${map['nombre'] ?? ''}'.trim();
-          if (id > 0 && name.isNotEmpty) {
-            options.add(_CashierOption(id: id, name: name));
-          }
-        }
-      }
-    }
     if (!mounted) return;
     setState(() {
       final unique = <int, _CashierOption>{};
@@ -144,6 +151,9 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
       _cashiers = sorted;
       _selectedCashierId = sorted.isEmpty ? null : sorted.first.id;
       _isLoadingCashiers = false;
+      if (sorted.isEmpty && loadError != null) {
+        _errorMessage = loadError;
+      }
     });
   }
 
@@ -368,7 +378,7 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
       }
     }
 
-    String cashierLabel = 'Todas las cajas';
+    String cashierLabel = 'Todos los cajeros';
     if (!_allCashiers) {
       cashierLabel = 'Cajero #${_selectedCashierId ?? 0}';
       for (final cashier in _cashiers) {
@@ -404,12 +414,19 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
   }
 
   Future<void> _handleCreateReport() async {
+    // Actualizar el rango final al momento de generar para incluir ventas
+    // realizadas mientras el diálogo estuvo abierto.
+    final now = DateTime.now();
+    if (now.isAfter(_fromDateTime)) {
+      _toDateTime = now;
+    }
+
     if (_toDateTime.isBefore(_fromDateTime)) {
       setState(() => _errorMessage = 'La fecha/hora final debe ser mayor o igual a la inicial.');
       return;
     }
     if (!_allCashiers && (_selectedCashierId ?? 0) <= 0) {
-      setState(() => _errorMessage = 'Selecciona un cajero especifico o usa Todas las cajas.');
+      setState(() => _errorMessage = 'Selecciona un cajero especifico o usa Todos los cajeros.');
       return;
     }
     setState(() {
@@ -569,7 +586,7 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
                   ),
                   const SizedBox(height: 12),
                   _fieldRow(
-                    label: 'Empleado',
+                    label: 'Cajero',
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
@@ -585,7 +602,7 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
                           items: [
                             const DropdownMenuItem<String>(
                               value: 'all',
-                              child: Text('Todas las cajas'),
+                              child: Text('Todos los cajeros'),
                             ),
                             ..._cashiers.map(
                               (cashier) => DropdownMenuItem<String>(
@@ -628,6 +645,17 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
                         child: Text(
                           'Cargando cajeros...',
                           style: TextStyle(color: Color(0xFF6B7280), fontSize: 12),
+                        ),
+                      ),
+                    ),
+                  if (!_isLoadingCashiers && _cashiers.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'No se encontraron cajeros. Verifica que existan empleados activos en la sucursal.',
+                          style: TextStyle(color: Color(0xFFB91C1C), fontSize: 12),
                         ),
                       ),
                     ),
@@ -724,16 +752,40 @@ class _SalesPreviewDialogState extends State<_SalesPreviewDialog> {
     return '${_two(value.day)}/${_two(value.month)}/${value.year} ${_two(value.hour)}:${_two(value.minute)}';
   }
 
-  String _lineKV(String key, String value, {int width = 42}) {
-    final left = key.trim();
-    final right = value.trim();
-    final gap = width - left.length - right.length;
-    if (gap <= 1) return '$left $right';
+  int get _reportLineWidth =>
+      PrinterManager.instance.charsPerLine(PrinterDestination.salesReport);
+
+  String _lineKV(String key, String value, {int? width}) {
+    final lineWidth = width ?? _reportLineWidth;
+    var left = key.trim();
+    var right = value.trim();
+    final total = left.length + right.length;
+
+    if (total >= lineWidth) {
+      // Dejar espacio para un separador entre ambos valores.
+      final available = lineWidth - 1;
+      final rightWidth = right.length > (available * 0.35).floor()
+          ? (available * 0.35).floor()
+          : right.length;
+      final leftWidth = available - rightWidth;
+      if (left.length > leftWidth) {
+        left = left.substring(0, leftWidth);
+      }
+      if (right.length > rightWidth) {
+        right = right.substring(0, rightWidth);
+      }
+      return '$left $right';
+    }
+
+    final gap = lineWidth - total;
     return '$left${' ' * gap}$right';
   }
 
-  String _buildPrintableReportText() {
+  String _separator({int? width}) => '-' * (width ?? _reportLineWidth);
+
+  String _buildPrintableReportText({int? printWidth}) {
     final p = widget.preview;
+    final width = printWidth ?? _reportLineWidth;
     final b = StringBuffer();
     b.writeln('RONS PIZZA');
     b.writeln(p.branchLabel);
@@ -742,54 +794,118 @@ class _SalesPreviewDialogState extends State<_SalesPreviewDialog> {
     b.writeln('Desde:    ${_dateTime(p.from)}');
     b.writeln('Hasta:    ${_dateTime(p.to)}');
     b.writeln('Cajero:   ${p.cashierLabel}');
-    b.writeln('------------------------------------------');
+    b.writeln(_separator(width: width));
     b.writeln('RESUMEN GENERAL');
-    b.writeln(_lineKV('Total vendido', _mxn(p.totalSold)));
-    b.writeln(_lineKV('Cantidad ordenes', '${p.orderCount}'));
-    b.writeln(_lineKV('Ticket promedio', _mxn(p.avgTicket)));
-    b.writeln(_lineKV('Descuentos', _mxn(p.totalDiscounts)));
-    b.writeln(_lineKV('Total neto', _mxn(p.netTotal)));
-    b.writeln('------------------------------------------');
+    b.writeln(_lineKV('Total vendido', _mxn(p.totalSold), width: width));
+    b.writeln(_lineKV('Cantidad ordenes', '${p.orderCount}', width: width));
+    b.writeln(_lineKV('Ticket promedio', _mxn(p.avgTicket), width: width));
+    b.writeln(_lineKV('Descuentos', _mxn(p.totalDiscounts), width: width));
+    b.writeln(_lineKV('Total neto', _mxn(p.netTotal), width: width));
+    b.writeln(_separator(width: width));
     b.writeln('TIPO DE PEDIDO');
     for (final row in p.byOrderType) {
       final label = '${row['label']} (${row['orders']})';
-      b.writeln(_lineKV(label, _mxn((row['total'] as num).toDouble())));
+      b.writeln(_lineKV(label, _mxn((row['total'] as num).toDouble()), width: width));
     }
-    b.writeln('------------------------------------------');
+    b.writeln(_separator(width: width));
     b.writeln('METODO DE PAGO');
     for (final row in p.byPaymentMethod) {
       final label = '${row['label']} (${row['orders']})';
-      b.writeln(_lineKV(label, _mxn((row['total'] as num).toDouble())));
+      b.writeln(_lineKV(label, _mxn((row['total'] as num).toDouble()), width: width));
     }
-    b.writeln('------------------------------------------');
+    b.writeln(_separator(width: width));
     b.writeln('DELIVERY');
-    b.writeln(_lineKV('Ventas domicilio (caja)', _mxn(p.deliverySales)));
-    b.writeln(_lineKV('Envios (repartidor)', _mxn(p.deliveryShipping)));
+    b.writeln(_lineKV('Ventas domicilio (caja)', _mxn(p.deliverySales), width: width));
+    b.writeln(_lineKV('Envios (repartidor)', _mxn(p.deliveryShipping), width: width));
     b.writeln(_lineKV(
-        'Bono 10 MXN x ${p.deliveryDeliveryCount} entreg.', _mxn(p.deliveryBonusTotal)));
-    b.writeln(_lineKV('Total ref. repartidor', _mxn(p.deliveryDriverShare)));
-    b.writeln(_lineKV('Ventas caja domicilio', _mxn(p.deliveryPizzeriaShare)));
+        'Bono 10 MXN x ${p.deliveryDeliveryCount} entreg.', _mxn(p.deliveryBonusTotal), width: width));
+    b.writeln(_lineKV('Total ref. repartidor', _mxn(p.deliveryDriverShare), width: width));
+    b.writeln(_lineKV('Ventas caja domicilio', _mxn(p.deliveryPizzeriaShare), width: width));
     if (p.showProducts && p.products.isNotEmpty) {
-      b.writeln('------------------------------------------');
+      b.writeln(_separator(width: width));
       b.writeln('PRODUCTOS');
       for (final product in p.products) {
         final name = '${product['name'] ?? 'Producto'}';
         final qty = (product['qty'] as num?)?.toDouble() ?? 0;
         final total = (product['total'] as num?)?.toDouble() ?? 0;
-        b.writeln(_lineKV('${qty.toStringAsFixed(0)} x $name', _mxn(total)));
+        b.writeln(_lineKV('${qty.toStringAsFixed(0)} x $name', _mxn(total), width: width));
       }
     }
-    b.writeln('------------------------------------------');
-    b.writeln('');
+    b.writeln(_separator(width: width));
     return b.toString().trimRight();
+  }
+
+  Uint8List _buildReportEscPos() {
+    final text = _buildPrintableReportText(printWidth: _reportLineWidth);
+    final lines = text.split('\n');
+    final b = EscPosBuilder()
+      ..init()
+      ..selectFontA()
+      ..leftMargin(0)
+      ..alignLeft();
+
+    for (final rawLine in lines) {
+      final line = rawLine.trimRight();
+      final trimmed = line.trim();
+      final upper = trimmed.toUpperCase();
+
+      if (trimmed == 'RONS PIZZA') {
+        b
+          ..alignCenter()
+          ..boldOn()
+          ..doubleHeightOn()
+          ..line(trimmed)
+          ..doubleHeightOff()
+          ..boldOff()
+          ..alignLeft();
+        continue;
+      }
+
+      if (trimmed == widget.preview.branchLabel ||
+          trimmed.startsWith('REPORTE DE VENTAS')) {
+        b
+          ..alignCenter()
+          ..boldOn()
+          ..line(trimmed)
+          ..boldOff()
+          ..alignLeft();
+        continue;
+      }
+
+      final isSectionHeader = upper == 'RESUMEN GENERAL' ||
+          upper == 'TIPO DE PEDIDO' ||
+          upper == 'METODO DE PAGO' ||
+          upper == 'DELIVERY' ||
+          upper == 'PRODUCTOS';
+      if (isSectionHeader) {
+        b.boldOn().line(line).boldOff();
+        continue;
+      }
+
+      final isBoldTotal = upper.startsWith('TOTAL') ||
+          upper.startsWith('VENTAS CAJA DOMICILIO') ||
+          upper.startsWith('TOTAL REF. REPARTIDOR');
+      if (isBoldTotal) {
+        b.boldOn().line(line).boldOff();
+        continue;
+      }
+
+      b.line(line);
+    }
+
+    b.emptyLine().emptyLine().feed(4).cut();
+    return b.build();
   }
 
   Future<void> _printReport() async {
     setState(() => _isPrinting = true);
     try {
       final printer = PrinterManager.instance.resolvePrinter(PrinterDestination.salesReport);
-      if (printer != null && printer.driver == PrinterDriver.pdf) {
-        if (!mounted) return;
+      if (printer == null) {
+        throw Exception('No hay impresora configurada para ${PrinterDestination.salesReport.label}');
+      }
+
+      if (printer.driver == PrinterDriver.pdf) {
         final filePath = await PrinterManager.instance.printTicket(
           destination: PrinterDestination.salesReport,
           text: _buildPrintableReportText(),
@@ -800,9 +916,11 @@ class _SalesPreviewDialogState extends State<_SalesPreviewDialog> {
         );
         return;
       }
-      await PrinterManager.instance.printTicket(
+
+      final bytes = _buildReportEscPos();
+      await PrinterManager.instance.printEscPosTicket(
         destination: PrinterDestination.salesReport,
-        text: _buildPrintableReportText(),
+        bytes: bytes,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

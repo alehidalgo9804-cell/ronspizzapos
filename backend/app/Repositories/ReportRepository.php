@@ -22,11 +22,11 @@ final class ReportRepository
         $params = ['sucursal_id' => $branchId];
 
         if ($from !== null && $from !== '') {
-            $where[] = 'p.fecha_pedido >= :from';
+            $where[] = 'COALESCE(p.fecha_cierre, p.fecha_pedido) >= :from';
             $params['from'] = $from;
         }
         if ($to !== null && $to !== '') {
-            $where[] = 'p.fecha_pedido <= :to';
+            $where[] = 'COALESCE(p.fecha_cierre, p.fecha_pedido) <= :to';
             $params['to'] = $to;
         }
         if ($meseroId !== null && $meseroId > 0) {
@@ -107,11 +107,11 @@ final class ReportRepository
         $params = ['sucursal_id' => $branchId];
 
         if ($from !== null && $from !== '') {
-            $where[] = 'p.fecha_pedido >= :from';
+            $where[] = 'COALESCE(p.fecha_cierre, p.fecha_pedido) >= :from';
             $params['from'] = $from;
         }
         if ($to !== null && $to !== '') {
-            $where[] = 'p.fecha_pedido <= :to';
+            $where[] = 'COALESCE(p.fecha_cierre, p.fecha_pedido) <= :to';
             $params['to'] = $to;
         }
         if ($meseroId !== null && $meseroId > 0) {
@@ -159,11 +159,11 @@ final class ReportRepository
         $canal = $filters['canal'] ?? null;
 
         if ($from !== null && $from !== '') {
-            $where[] = 'p.fecha_pedido >= :from';
+            $where[] = 'COALESCE(p.fecha_cierre, p.fecha_pedido) >= :from';
             $params['from'] = $from;
         }
         if ($to !== null && $to !== '') {
-            $where[] = 'p.fecha_pedido <= :to';
+            $where[] = 'COALESCE(p.fecha_cierre, p.fecha_pedido) <= :to';
             $params['to'] = $to;
         }
         if ($meseroId !== null && $meseroId > 0) {
@@ -199,10 +199,14 @@ final class ReportRepository
                 p.envio_total,
                 p.descuento_total,
                 p.fecha_pedido,
+                p.usuario_id,
+                COALESCE(u.nombre, '') AS mesero_nombre,
+                COALESCE(u.apellido, '') AS mesero_apellido,
                 c.nombre AS cliente_nombre,
                 c.apellidos AS cliente_apellidos
              FROM pedidos p
              LEFT JOIN clientes c ON c.id = p.cliente_id
+             LEFT JOIN usuarios u ON u.id = p.usuario_id
              WHERE {$whereSql}
                AND p.estado NOT IN ('cancelado', 'cancelled')
              ORDER BY p.fecha_pedido DESC
@@ -252,5 +256,69 @@ final class ReportRepository
                 'discounts' => (float) ($order['descuento_total'] ?? 0),
             ],
         ];
+    }
+
+    /**
+     * Devuelve un resumen diario por sucursal: pedidos, ventas y tickets impresos.
+     *
+     * @return array<int, array{
+     *     id: int,
+     *     nombre: string,
+     *     clave: string|null,
+     *     total_pedidos: int,
+     *     total_ventas: float,
+     *     total_tickets: int
+     * }>
+     */
+    public function branchDailySummary(string $date): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT
+                s.id,
+                s.nombre,
+                s.clave,
+                COALESCE(v.total_pedidos, 0) AS total_pedidos,
+                COALESCE(v.total_ventas, 0) AS total_ventas,
+                COALESCE(t.total_tickets, 0) AS total_tickets
+             FROM sucursales s
+             LEFT JOIN (
+                 SELECT
+                     p.sucursal_id,
+                     COUNT(DISTINCT p.id) AS total_pedidos,
+                     COALESCE(SUM(p.total), 0) AS total_ventas
+                 FROM pedidos p
+                 WHERE p.estado NOT IN ('cancelado', 'cancelled')
+                   AND DATE(COALESCE(p.fecha_cierre, p.fecha_pedido)) = :ventas_date
+                 GROUP BY p.sucursal_id
+             ) v ON v.sucursal_id = s.id
+             LEFT JOIN (
+                 SELECT
+                     p.sucursal_id,
+                     COUNT(*) AS total_tickets
+                 FROM ticket_impresiones ti
+                 JOIN pedidos p ON p.id = ti.pedido_id
+                 WHERE DATE(ti.created_at) = :tickets_date
+                   AND ti.estado_impresion = 'printed'
+                 GROUP BY p.sucursal_id
+             ) t ON t.sucursal_id = s.id
+             WHERE s.activa = 1
+             ORDER BY s.nombre ASC"
+        );
+        $stmt->execute([
+            'ventas_date' => $date,
+            'tickets_date' => $date,
+        ]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(static function (array $row): array {
+            return [
+                'id' => (int) $row['id'],
+                'nombre' => $row['nombre'],
+                'clave' => $row['clave'],
+                'total_pedidos' => (int) $row['total_pedidos'],
+                'total_ventas' => (float) $row['total_ventas'],
+                'total_tickets' => (int) $row['total_tickets'],
+            ];
+        }, $rows);
     }
 }

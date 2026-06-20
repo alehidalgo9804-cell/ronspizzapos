@@ -27,6 +27,8 @@ final class AdminUserService
 
     public function create(array $data): array
     {
+        $data = $this->normalizeBranches($data);
+        $data['email'] = empty($data['email']) ? null : trim((string) $data['email']);
         $errors = $this->validate($data, true);
         if (!empty($errors)) {
             return ['success' => false, 'errors' => $errors];
@@ -37,7 +39,12 @@ final class AdminUserService
             return ['success' => false, 'errors' => ['usuario' => 'El usuario ya existe']];
         }
 
-        $data['password_hash'] = password_hash($data['password'], PASSWORD_BCRYPT);
+        if (!empty($data['password'])) {
+            $data['password_hash'] = password_hash($data['password'], PASSWORD_BCRYPT);
+        }
+        if (!empty($data['pin'])) {
+            $data['pin'] = (string) $data['pin'];
+        }
         $id = $this->repo->create($data);
 
         return ['success' => true, 'id' => $id];
@@ -45,6 +52,10 @@ final class AdminUserService
 
     public function update(int $id, array $data): array
     {
+        $data = $this->normalizeBranches($data);
+        if (array_key_exists('email', $data)) {
+            $data['email'] = empty($data['email']) ? null : trim((string) $data['email']);
+        }
         $errors = $this->validate($data, false);
         if (!empty($errors)) {
             return ['success' => false, 'errors' => $errors];
@@ -63,13 +74,19 @@ final class AdminUserService
         }
 
         $updateData = [];
-        foreach (['usuario', 'nombre', 'apellido', 'email', 'rol_id', 'sucursal_id', 'activo'] as $key) {
+        foreach (['usuario', 'nombre', 'apellido', 'email', 'rol_id', 'sucursal_id', 'activo', 'pin'] as $key) {
             if (array_key_exists($key, $data)) {
                 $updateData[$key] = $data[$key];
             }
         }
+        if (array_key_exists('sucursales', $data)) {
+            $updateData['sucursales'] = $data['sucursales'];
+        }
         if (!empty($data['password'])) {
             $updateData['password_hash'] = password_hash($data['password'], PASSWORD_BCRYPT);
+        }
+        if (array_key_exists('pin', $updateData)) {
+            $updateData['pin'] = (string) $updateData['pin'];
         }
 
         $this->repo->update($id, $updateData);
@@ -90,8 +107,22 @@ final class AdminUserService
             }
         }
 
-        $this->repo->softDelete($id);
+        $this->repo->hardDelete($id);
         return ['success' => true];
+    }
+
+    private function normalizeBranches(array $data): array
+    {
+        if (!empty($data['sucursales']) && is_array($data['sucursales'])) {
+            $data['sucursales'] = array_values(array_filter(array_map('intval', $data['sucursales'])));
+            if (!empty($data['sucursales']) && empty($data['sucursal_id'])) {
+                $data['sucursal_id'] = $data['sucursales'][0];
+            }
+        } elseif (!empty($data['sucursal_id'])) {
+            $data['sucursales'] = [(int) $data['sucursal_id']];
+        }
+
+        return $data;
     }
 
     private function validate(array $data, bool $isCreate): array
@@ -112,14 +143,24 @@ final class AdminUserService
         }
 
         if ($isCreate) {
-            if (empty($data['password']) || strlen((string) $data['password']) < 6) {
-                $errors['password'] = 'La contraseña debe tener al menos 6 caracteres';
-            }
             if (empty($data['rol_id'])) {
                 $errors['rol_id'] = 'El rol es obligatorio';
             }
-            if (empty($data['sucursal_id'])) {
-                $errors['sucursal_id'] = 'La sucursal es obligatoria';
+            if (empty($data['sucursales']) || !is_array($data['sucursales']) || empty(array_filter($data['sucursales']))) {
+                $errors['sucursales'] = 'Selecciona al menos una sucursal';
+            }
+        }
+
+        if (!$isCreate && array_key_exists('sucursales', $data)) {
+            if (empty($data['sucursales']) || !is_array($data['sucursales']) || empty(array_filter($data['sucursales']))) {
+                $errors['sucursales'] = 'Selecciona al menos una sucursal';
+            }
+        }
+
+        if (!empty($data['pin'])) {
+            $pin = (string) $data['pin'];
+            if (!ctype_digit($pin) || strlen($pin) < 4) {
+                $errors['pin'] = 'El PIN debe ser numerico y tener al menos 4 digitos';
             }
         }
 
