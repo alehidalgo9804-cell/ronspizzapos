@@ -84,7 +84,6 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
   bool _isLoadingCashiers = true;
   bool _isGenerating = false;
   String? _errorMessage;
-  String _debugInfo = '';
   List<_CashierOption> _cashiers = const [];
 
   @override
@@ -100,7 +99,6 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
     setState(() {
       _isLoadingCashiers = true;
       _errorMessage = null;
-      _debugInfo = '';
     });
     final options = <_CashierOption>[];
     String? loadError;
@@ -111,7 +109,6 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
     // disponible para cualquier usuario autenticado (incluidos cajeros).
     try {
       final usersResponse = await _session.apiClient.get('/pos-cashiers');
-      _debugInfo = 'userId=${_session.userId}, branchId=${_session.branchId}, response=$usersResponse';
       if (usersResponse['success'] == true) {
         final users = (usersResponse['data'] as List?) ?? const [];
         for (final row in users) {
@@ -156,9 +153,6 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
       _isLoadingCashiers = false;
       if (sorted.isEmpty && loadError != null) {
         _errorMessage = loadError;
-      }
-      if (sorted.isEmpty) {
-        _debugInfo = '$_debugInfo\n(opciones vacias)';
       }
     });
   }
@@ -676,17 +670,7 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
                         ),
                       ),
                     ),
-                  if (_debugInfo.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: SelectableText(
-                          'Debug: $_debugInfo',
-                          style: const TextStyle(color: Color(0xFF6B7280), fontSize: 10),
-                        ),
-                      ),
-                    ),
+
                 ],
               ),
             ),
