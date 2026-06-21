@@ -63,12 +63,15 @@ final class CustomerService extends BaseCrudService
         if ($customer === null && $phone !== '') {
             $customer = $this->customers->findByPhone($phone);
         }
+        if ($customer === null && $name !== '') {
+            $customer = $this->customers->findByName($name, $lastName);
+        }
 
         if ($customer === null) {
             $customerId = $this->customers->create([
                 'nombre' => $name !== '' ? $name : 'Cliente',
                 'apellidos' => $lastName !== '' ? $lastName : null,
-                'telefono' => $phone !== '' ? $phone : ('tmp-' . uniqid()),
+                'telefono' => $phone !== '' ? $phone : null,
                 'notas' => $notes !== '' ? $notes : null,
                 'activo' => 1,
             ]);
@@ -80,6 +83,9 @@ final class CustomerService extends BaseCrudService
             }
             if ($lastName !== '' && trim((string) ($customer['apellidos'] ?? '')) !== $lastName) {
                 $updatePayload['apellidos'] = $lastName;
+            }
+            if ($phone !== '' && trim((string) ($customer['telefono'] ?? '')) !== $phone) {
+                $updatePayload['telefono'] = $phone;
             }
             if ($notes !== '' && trim((string) ($customer['notas'] ?? '')) !== $notes) {
                 $updatePayload['notas'] = $notes;

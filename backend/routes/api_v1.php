@@ -3,9 +3,15 @@
 declare(strict_types=1);
 
 use App\Controllers\V1\AdminAuthController;
+use App\Controllers\V1\AdminCustomerController;
+use App\Controllers\V1\AdminReceiptController;
+use App\Controllers\V1\AdminReportController;
+use App\Controllers\V1\QrOrderController;
 use App\Controllers\V1\AdminUserController;
+use App\Controllers\V1\AppUpdateController;
 use App\Controllers\V1\AuthController;
 use App\Controllers\V1\BranchController;
+use App\Controllers\V1\MesaController;
 use App\Controllers\V1\CashController;
 use App\Controllers\V1\CategoryController;
 use App\Controllers\V1\CustomerController;
@@ -26,7 +32,9 @@ use App\Middleware\JsonBodyMiddleware;
 
 $router->group('/api/v1', [new JsonBodyMiddleware()], function ($router): void {
     $router->post('/auth/login', [AuthController::class, 'login']);
+    $router->post('/auth/verify-admin-pin', [AuthController::class, 'verifyAdminPin']);
     $router->get('/branches', [BranchController::class, 'index']);
+    $router->get('/app/update', [AppUpdateController::class, 'status']);
 
     $router->group('', [new AuthMiddleware(), new BranchScopeMiddleware()], function ($router): void {
         $router->get('/auth/me', [AuthController::class, 'me']);
@@ -54,6 +62,7 @@ $router->group('/api/v1', [new JsonBodyMiddleware()], function ($router): void {
         $router->get('/pizza-builder/catalog', [PizzaBuilderController::class, 'catalog']);
 
         $router->get('/orders', [OrderController::class, 'index']);
+        $router->get('/orders/stream', [OrderController::class, 'stream']);
         $router->get('/orders/{id}', [OrderController::class, 'show']);
         $router->post('/orders', [OrderController::class, 'store']);
         $router->put('/orders/{id}', [OrderController::class, 'update']);
@@ -80,8 +89,10 @@ $router->group('/api/v1', [new JsonBodyMiddleware()], function ($router): void {
         $router->get('/reportes/productos', [ReportController::class, 'products']);
         $router->get('/reportes/recibos', [ReportController::class, 'receipts']);
         $router->get('/reportes/recibos/{orderId}', [ReportController::class, 'receiptDetail']);
+        $router->get('/reportes/sucursales-resumen', [ReportController::class, 'branchDailySummary']);
 
         $router->get('/employees', [EmployeeController::class, 'index']);
+        $router->get('/pos-cashiers', [EmployeeController::class, 'cashiers']);
 
         $router->get('/deliveries/pending', [DeliveryController::class, 'pending']);
         $router->post('/deliveries/assign', [DeliveryController::class, 'assign']);
@@ -90,6 +101,35 @@ $router->group('/api/v1', [new JsonBodyMiddleware()], function ($router): void {
 
         $router->get('/drivers', [DriverController::class, 'index']);
         $router->get('/drivers/me', [DriverController::class, 'me']);
+    });
+
+    // Admin user endpoints for the POS (require admin role).
+    $router->group('', [new AdminMiddleware()], function ($router): void {
+        $router->get('/admin-usuarios', [AdminUserController::class, 'index']);
+        $router->get('/admin-usuarios/{id}', [AdminUserController::class, 'show']);
+        $router->post('/admin-usuarios', [AdminUserController::class, 'store']);
+        $router->put('/admin-usuarios/{id}', [AdminUserController::class, 'update']);
+        $router->delete('/admin-usuarios/{id}', [AdminUserController::class, 'destroy']);
+
+        $router->get('/admin-roles', function () {
+            $pdo = \App\Core\Database::connection();
+            $rows = $pdo->query("SELECT id, nombre, descripcion FROM roles ORDER BY id")->fetchAll(\PDO::FETCH_ASSOC);
+            \App\Core\Response::json(['success' => true, 'data' => $rows]);
+        });
+
+        $router->get('/admin-sucursales', [BranchController::class, 'index']);
+    });
+
+    // Admin customer endpoints available to any authenticated POS user.
+    $router->group('', [new AuthMiddleware()], function ($router): void {
+        $router->get('/admin-clientes', [AdminCustomerController::class, 'index']);
+        $router->get('/admin-clientes/{id}', [AdminCustomerController::class, 'show']);
+        $router->post('/admin-clientes', [AdminCustomerController::class, 'store']);
+        $router->put('/admin-clientes/{id}', [AdminCustomerController::class, 'update']);
+        $router->delete('/admin-clientes/{id}', [AdminCustomerController::class, 'destroy']);
+        $router->post('/admin-clientes/{id}/direcciones', [AdminCustomerController::class, 'addAddress']);
+        $router->put('/admin-clientes/{id}/direcciones/{dirId}', [AdminCustomerController::class, 'updateAddress']);
+        $router->delete('/admin-clientes/{id}/direcciones/{dirId}', [AdminCustomerController::class, 'removeAddress']);
     });
 
     // Backoffice routes (admin only)
@@ -103,6 +143,19 @@ $router->group('/api/v1', [new JsonBodyMiddleware()], function ($router): void {
         $router->put('/usuarios/{id}', [AdminUserController::class, 'update']);
         $router->delete('/usuarios/{id}', [AdminUserController::class, 'destroy']);
 
+        $router->get('/reportes/modificadores', [AdminReportController::class, 'modificadores']);
+
+        $router->get('/clientes', [AdminCustomerController::class, 'index']);
+        $router->get('/clientes/{id}', [AdminCustomerController::class, 'show']);
+        $router->post('/clientes', [AdminCustomerController::class, 'store']);
+        $router->put('/clientes/{id}', [AdminCustomerController::class, 'update']);
+        $router->delete('/clientes/{id}', [AdminCustomerController::class, 'destroy']);
+        $router->post('/clientes/{id}/direcciones', [AdminCustomerController::class, 'addAddress']);
+        $router->delete('/clientes/{id}/direcciones/{dirId}', [AdminCustomerController::class, 'removeAddress']);
+
+        $router->get('/recibos', [AdminReceiptController::class, 'index']);
+        $router->get('/recibos/{id}', [AdminReceiptController::class, 'show']);
+
         $router->get('/sucursales', [BranchController::class, 'index']);
         $router->get('/roles', function () use ($router) {
             $pdo = \App\Core\Database::connection();
@@ -112,4 +165,9 @@ $router->group('/api/v1', [new JsonBodyMiddleware()], function ($router): void {
     });
 
     $router->post('/backoffice/login', [AdminAuthController::class, 'login']);
+
+    // QR self-service (public) — deshabilitado temporalmente
+    // $router->get('/mesas', [MesaController::class, 'index']);
+    // $router->get('/qr/catalogo', [QrOrderController::class, 'catalog']);
+    // $router->post('/qr/pedido', [QrOrderController::class, 'store']);
 });

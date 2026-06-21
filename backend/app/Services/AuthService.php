@@ -65,6 +65,32 @@ final class AuthService
         ];
     }
 
+    public function verifyAdminPin(array $payload): array
+    {
+        $pin = trim((string) ($payload['pin'] ?? ''));
+        $sucursalId = (int) ($payload['sucursal_id'] ?? 0);
+
+        if ($pin === '' || $sucursalId <= 0) {
+            return ['valid' => false, 'message' => 'PIN y sucursal requeridos'];
+        }
+
+        $user = $this->users->findByPinAndBranch($pin, $sucursalId);
+        if ($user === null) {
+            $user = $this->employees->findActiveUserByCashPinAndBranch($pin, $sucursalId);
+        }
+
+        if ($user === null) {
+            return ['valid' => false, 'message' => 'PIN incorrecto'];
+        }
+
+        $role = strtolower((string) ($user['rol_nombre'] ?? ''));
+        if ($role !== 'admin') {
+            return ['valid' => false, 'message' => 'El usuario no es administrador'];
+        }
+
+        return ['valid' => true];
+    }
+
     public function logout(string $token): bool
     {
         $pdo = Database::connection();

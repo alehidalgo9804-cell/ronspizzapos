@@ -11,6 +11,7 @@ class PaymentView extends StatefulWidget {
     required this.tableNumber,
     required this.orderTotal,
     required this.orderItems,
+    required this.guests,
     required this.onCancel,
     required this.onComplete,
     required this.onCloseWithoutPayment,
@@ -20,6 +21,7 @@ class PaymentView extends StatefulWidget {
   final String tableNumber;
   final double orderTotal;
   final List<OrderItemData> orderItems;
+  final List<GuestData> guests;
   final VoidCallback onCancel;
   final Future<void> Function(PaymentData) onComplete;
   final ValueChanged<String> onCloseWithoutPayment;
@@ -379,6 +381,153 @@ class _PaymentViewState extends State<PaymentView> {
     );
   }
 
+  List<Widget> _buildOrderSections() {
+    final guests = widget.guests.isNotEmpty
+        ? widget.guests
+        : const [GuestData(id: 1, name: 'Cliente 1')];
+    final showGuestHeaders = guests.length > 1;
+    final sections = <Widget>[];
+
+    for (final guest in guests) {
+      final guestItems =
+          widget.orderItems.where((i) => i.guestId == guest.id).toList();
+      if (guestItems.isEmpty) continue;
+
+      if (showGuestHeaders) {
+        sections.add(
+          Container(
+            color: const Color(0xFFEFF6FF),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    guest.name.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1D4ED8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      for (final item in guestItems) {
+        final lineTotal = item.price * item.quantity;
+        sections.add(
+          Container(
+            decoration: const BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFF3F4F6)),
+              ),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 40,
+                  child: Text(
+                    item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF111827),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 16,
+                  child: Text(
+                    '${item.quantity}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 22,
+                  child: Text(
+                    '\$${item.price.toStringAsFixed(2)}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF4B5563),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 22,
+                  child: Text(
+                    '\$${lineTotal.toStringAsFixed(2)}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF111827),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      final guestSubtotal = guestItems.fold<double>(
+        0.0,
+        (sum, item) => sum + item.price * item.quantity,
+      );
+      sections.add(
+        Container(
+          decoration: const BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: Color(0xFFE5E7EB)),
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 78,
+                child: Text(
+                  showGuestHeaders ? 'Total ${guest.name}' : 'Total',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: 22,
+                child: Text(
+                  '\$${guestSubtotal.toStringAsFixed(2)}',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF111827),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return sections;
+  }
+
   Widget _buildCurrentOrderPanel() {
     return Container(
       color: const Color(0xFFF9FAFB),
@@ -462,72 +611,8 @@ class _PaymentViewState extends State<PaymentView> {
                         style: TextStyle(color: Color(0xFF9CA3AF)),
                       ),
                     )
-                  : ListView.builder(
-                      itemCount: widget.orderItems.length,
-                      itemBuilder: (context, index) {
-                        final item = widget.orderItems[index];
-                        final lineTotal = item.price * item.quantity;
-                        return Container(
-                          decoration: const BoxDecoration(
-                            border: Border(
-                              bottom: BorderSide(color: Color(0xFFF3F4F6)),
-                            ),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                flex: 40,
-                                child: Text(
-                                  item.name,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF111827),
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 16,
-                                child: Text(
-                                  '${item.quantity}',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF374151),
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 22,
-                                child: Text(
-                                  '\$${item.price.toStringAsFixed(2)}',
-                                  textAlign: TextAlign.right,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF4B5563),
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                flex: 22,
-                                child: Text(
-                                  '\$${lineTotal.toStringAsFixed(2)}',
-                                  textAlign: TextAlign.right,
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Color(0xFF111827),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                  : ListView(
+                      children: _buildOrderSections(),
                     ),
             ),
           ),

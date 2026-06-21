@@ -26,6 +26,13 @@ final class AdminUserController extends Controller
         if (!empty($request->query['rol_id'])) {
             $filters['rol_id'] = $request->query['rol_id'];
         }
+        $rolesQuery = trim((string) ($request->query['roles'] ?? ''));
+        if ($rolesQuery !== '') {
+            $filters['roles'] = array_filter(array_map('trim', explode(',', $rolesQuery)));
+        }
+        if (isset($request->query['activo'])) {
+            $filters['activo'] = (int) $request->query['activo'];
+        }
         if (!empty($request->query['busqueda'])) {
             $filters['busqueda'] = $request->query['busqueda'];
         }
@@ -47,7 +54,7 @@ final class AdminUserController extends Controller
     {
         $result = $this->service->create($request->body);
         if (!$result['success']) {
-            $this->fail($result['errors'], 422);
+            $this->fail('Error de validacion', 422, $result['errors']);
             return;
         }
         $this->ok(['id' => $result['id']], 'Usuario creado', 201);
@@ -58,7 +65,7 @@ final class AdminUserController extends Controller
         $id = (int) ($request->params['id'] ?? 0);
         $result = $this->service->update($id, $request->body);
         if (!$result['success']) {
-            $this->fail($result['errors'], 422);
+            $this->fail('Error de validacion', 422, $result['errors']);
             return;
         }
         $this->ok([], 'Usuario actualizado');

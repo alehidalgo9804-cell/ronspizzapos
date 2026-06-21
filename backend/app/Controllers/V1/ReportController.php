@@ -101,4 +101,15 @@ final class ReportController extends Controller
 
         $this->ok($detail);
     }
+
+    public function branchDailySummary(Request $request): void
+    {
+        $date = $request->query['date'] ?? date('Y-m-d');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $this->fail('Fecha invalida', 422);
+            return;
+        }
+
+        $this->ok($this->service->branchDailySummary($date));
+    }
 }

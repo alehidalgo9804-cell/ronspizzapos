@@ -28,6 +28,17 @@ final class AuthController extends Controller
         $this->ok($result, 'Authenticated');
     }
 
+    public function verifyAdminPin(Request $request): void
+    {
+        $result = $this->service->verifyAdminPin($request->body);
+        if ($result['valid'] !== true) {
+            $this->fail($result['message'] ?? 'PIN inválido', 403);
+            return;
+        }
+
+        $this->ok(null, 'Admin PIN verified');
+    }
+
     public function logout(Request $request): void
     {
         $token = (string) ($request->attributes['auth_token'] ?? '');

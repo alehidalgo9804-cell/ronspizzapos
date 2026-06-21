@@ -104,12 +104,23 @@ class PrinterManager {
           final name = '${item['name'] ?? ''}'.trim();
           final driverRaw = '${item['driver'] ?? ''}'.trim();
           final enabledRaw = item['enabled'];
+          final ip = '${item['ip'] ?? ''}'.trim();
+          final portRaw = item['port'];
           if (id.isEmpty || name.isEmpty) continue;
           final driver = _driverFromString(driverRaw);
           final enabled = enabledRaw is bool ? enabledRaw : true;
           final paperWidth = _paperWidthFromString('${item['paperWidth'] ?? ''}'.trim());
+          final port = portRaw is int ? portRaw : 9100;
           loadedPrinters.add(
-            PosPrinter(id: id, name: name, driver: driver, enabled: enabled, paperWidth: paperWidth),
+            PosPrinter(
+              id: id,
+              name: name,
+              driver: driver,
+              enabled: enabled,
+              paperWidth: paperWidth,
+              ip: ip,
+              port: port,
+            ),
           );
         }
       }
@@ -157,6 +168,8 @@ class PrinterManager {
                   'driver': p.driver.name,
                   'enabled': p.enabled,
                   'paperWidth': p.paperWidth.name,
+                  'ip': p.ip,
+                  'port': p.port,
                 })
             .toList(),
         'routing': {
@@ -205,7 +218,7 @@ class PrinterManager {
 
   int charsPerLine(PrinterDestination destination) {
     final printer = resolvePrinter(destination);
-    if (printer?.paperWidth == PrinterPaperWidth.mm80) return 56;
+    if (printer?.paperWidth == PrinterPaperWidth.mm80) return 48;
     return 42;
   }
 
@@ -241,11 +254,16 @@ class PrinterManager {
           await KitchenPrinter.printCustomerReceipt(text);
         }
         return null;
+      case PrinterDriver.networkEscPos:
+        throw Exception(
+          'Las impresoras de red requieren bytes ESC/POS. '
+          'Usa printEscPosTicket() en lugar de printTicket().',
+        );
     }
   }
 
-  /// Imprime bytes ESC/POS raw en la impresora térmica asignada al [destination].
-  /// Solo válido para impresoras térmicas (no PDF).
+  /// Imprime bytes ESC/POS raw en la impresora asignada al [destination].
+  /// Soporta impresoras térmicas Windows y de red.
   Future<void> printEscPosTicket({
     required PrinterDestination destination,
     required Uint8List bytes,
@@ -274,7 +292,72 @@ class PrinterManager {
           await KitchenPrinter.printCustomerReceiptBytes(bytes);
         }
         return;
+      case PrinterDriver.networkEscPos:
+        await _sendNetworkBytes(printer.ip, printer.port, bytes);
+        return;
     }
+  }
+
+  /// Envía [bytes] a una impresora de red ESC/POS por TCP.
+  Future<void> _sendNetworkBytes(String ip, int port, Uint8List bytes) async {
+    if (ip.isEmpty) {
+      throw Exception('La impresora de red no tiene IP configurada.');
+    }
+    Socket? socket;
+    try {
+      socket = await Socket.connect(ip, port, timeout: const Duration(seconds: 5));
+      socket.add(bytes);
+      await socket.flush();
+      // Pequeña pausa para asegurar que el buffer se transmita antes de cerrar.
+      await Future.delayed(const Duration(milliseconds: 200));
+    } on SocketException catch (e) {
+      throw Exception('No se pudo conectar a la impresora de red $ip:$port. ${e.message}');
+    } catch (e) {
+      throw Exception('Error enviando ticket a $ip:$port: $e');
+    } finally {
+      socket?.destroy();
+    }
+  }
+
+  /// Intenta conectarse a [ip]:[port] para verificar que la impresora responde.
+  Future<bool> testNetworkConnection(String ip, int port) async {
+    try {
+      final socket = await Socket.connect(ip, port, timeout: const Duration(seconds: 3));
+      socket.destroy();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Escanea la red local buscando impresoras ESC/POS en el puerto 9100.
+  /// [subnet] debe ser algo como "192.168.1" y [start]-[end] el rango de host.
+  /// Retorna una lista de IPs que respondieron en el puerto 9100.
+  Future<List<String>> discoverNetworkPrinters({
+    required String subnet,
+    int start = 1,
+    int end = 254,
+    int port = 9100,
+    Duration timeout = const Duration(milliseconds: 800),
+  }) async {
+    final found = <String>[];
+    final futures = <Future<void>>[];
+    for (int i = start; i <= end; i++) {
+      final ip = '$subnet.$i';
+      futures.add(
+        Future(() async {
+          try {
+            final socket = await Socket.connect(ip, port, timeout: timeout);
+            socket.destroy();
+            found.add(ip);
+          } catch (_) {
+            // ignorar hosts que no respondan
+          }
+        }),
+      );
+    }
+    await Future.wait(futures);
+    return found;
   }
 
   Future<String> _saveAsTxt({

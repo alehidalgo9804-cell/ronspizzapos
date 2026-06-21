@@ -25,6 +25,7 @@ class _CommonLabels {
   final String total = 'Total';
   final String pay = 'Pagar';
   final String sendToKitchen = 'Enviar a cocina';
+  final String sendNewToKitchen = 'Enviar nuevos a cocina';
   final String noItemsInOrder = 'Sin productos en la orden';
   final String table = 'Mesa';
   final String ticket = 'Ticket';
@@ -108,7 +109,7 @@ class _ButtonLabels {
   final String completePayment = 'Completar pago';
   final String closeWithoutPayment = 'Cerrar sin pagar';
   final String confirmClose = 'Confirmar cierre';
-  final String reprintTicket = 'Reimprimir ticket';
+  final String reprintTicket = 'Reimprimir comanda';
   final String printing = 'Imprimiendo...';
 }
 

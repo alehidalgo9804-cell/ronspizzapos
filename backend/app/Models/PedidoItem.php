@@ -21,6 +21,7 @@ final class PedidoItem extends BaseModel
         'estado',
         'impresora_destino_id',
         'parent_item_id',
+        'guest_id',
     ];
     protected array $relations = [
         'belongsTo' => ['pedidos', 'productos'],

@@ -1,7 +1,8 @@
 param(
   [string]$ApiBaseUrl = "https://ronspizza.net/ronspizzapos/backend/public",
   [string]$InnoPath = "",
-  [string]$VcRedistPath = "C:\Installers\VC_redist"
+  [string]$VcRedistPath = "C:\Installers\VC_redist",
+  [string]$AppVersion = "1.0.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,14 +17,14 @@ Write-Host "[2/4] flutter pub get"
 flutter pub get
 
 Write-Host "[3/4] flutter build windows --release"
-flutter build windows --release --dart-define="API_BASE_URL=$ApiBaseUrl"
+flutter build windows --release --dart-define="API_BASE_URL=$ApiBaseUrl" --dart-define="APP_VERSION=$AppVersion"
 
 $buildDir = Join-Path $projectRoot "build\windows\x64\runner\Release"
 if (-not (Test-Path (Join-Path $buildDir "rons_pizza_pos.exe"))) {
-  throw "No se encontró rons_pizza_pos.exe en $buildDir"
+  throw "No se encontrÃ³ rons_pizza_pos.exe en $buildDir"
 }
 
-if (-not (Test-Path $InnoPath)) {
+if ([string]::IsNullOrWhiteSpace($InnoPath) -or -not (Test-Path $InnoPath)) {
   $innoCandidates = @(
     "C:\Program Files\Inno Setup 7\ISCC.exe",
     "C:\Program Files (x86)\Inno Setup 7\ISCC.exe",
@@ -36,17 +37,18 @@ if (-not (Test-Path $InnoPath)) {
   }
 }
 
-if (-not (Test-Path $InnoPath)) {
-  throw "No se encontró ISCC.exe. Rutas probadas: Inno Setup 7/6. Puedes pasar -InnoPath explícito."
+if ([string]::IsNullOrWhiteSpace($InnoPath) -or -not (Test-Path $InnoPath)) {
+  throw "No se encontrÃ³ ISCC.exe. Rutas probadas: Inno Setup 7/6. Puedes pasar -InnoPath explÃ­cito."
 }
 
 $issPath = Join-Path $PSScriptRoot "RonsPizzaPOS.iss"
 if (-not (Test-Path $issPath)) {
-  throw "No se encontró el script Inno: $issPath"
+  throw "No se encontrÃ³ el script Inno: $issPath"
 }
 
 $cmdArgs = @(
-  "/DBuildDir=$buildDir"
+  "/DBuildDir=$buildDir",
+  "/DAppVersion=$AppVersion"
 )
 
 $vcCandidates = @(

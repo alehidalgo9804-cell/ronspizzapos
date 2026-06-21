@@ -1,4 +1,4 @@
-enum PosView { tables, pos, payment, customers }
+enum PosView { tables, pos, payment, customers, users, branches }
 
 enum TableStatus { available, occupied, awaitingPayment }
 
@@ -713,36 +713,50 @@ class CustomerData {
   const CustomerData({
     required this.id,
     required this.name,
+    this.lastName,
     this.phone,
     this.phoneAlt,
     this.email,
     this.notes,
     this.active = true,
+    this.totalAddresses = 0,
   });
 
   factory CustomerData.fromJson(Map<String, dynamic> json) {
     return CustomerData(
       id: json['id'] as int? ?? 0,
       name: json['nombre'] as String? ?? '',
+      lastName: json['apellidos'] as String?,
       phone: json['telefono'] as String?,
       phoneAlt: json['telefono_alterno'] as String?,
       email: json['email'] as String?,
       notes: json['notas'] as String?,
       active: (json['activo'] as int? ?? 1) == 1,
+      totalAddresses: json['total_direcciones'] as int? ?? 0,
     );
   }
 
   final int id;
   final String name;
+  final String? lastName;
   final String? phone;
   final String? phoneAlt;
   final String? email;
   final String? notes;
   final bool active;
+  final int totalAddresses;
+
+  String get displayName {
+    final parts = <String>[name];
+    final last = lastName?.trim();
+    if (last != null && last.isNotEmpty) parts.add(last);
+    return parts.join(' ');
+  }
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'nombre': name,
+      if (lastName != null && lastName!.isNotEmpty) 'apellidos': lastName,
       if (phone != null && phone!.isNotEmpty) 'telefono': phone,
       if (phoneAlt != null && phoneAlt!.isNotEmpty) 'telefono_alterno': phoneAlt,
       if (email != null && email!.isNotEmpty) 'email': email,

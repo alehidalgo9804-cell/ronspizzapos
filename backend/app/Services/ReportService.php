@@ -42,4 +42,9 @@ final class ReportService
     {
         return null;
     }
+
+    public function branchDailySummary(string $date): array
+    {
+        return $this->repository->branchDailySummary($date);
+    }
 }

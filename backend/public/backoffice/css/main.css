@@ -398,10 +398,101 @@ tr:hover td { background: rgba(243,244,246,0.5); }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Menu toggle */
+.menu-toggle {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: var(--text);
+  padding: 4px 8px;
+  margin-right: 12px;
+}
+
+/* Mobile cards pattern - hide on desktop, show on mobile */
+.mobile-card-list { display: none; }
+
 /* Mobile */
 @media (max-width: 768px) {
-  .sidebar { width: 100%; transform: translateX(-100%); transition: transform .25s; }
+  .menu-toggle { display: block; }
+  .sidebar { width: 260px; transform: translateX(-100%); transition: transform .25s; z-index: 50; }
   .sidebar.open { transform: translateX(0); }
   .main { margin-left: 0; }
-  .filters .form-control { width: 100%; }
+  .topbar { padding: 12px 16px; }
+  .topbar h2 { font-size: 16px; }
+  .content { padding: 16px; }
+  .card { padding: 16px; }
+  .card-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .card-header h3 { font-size: 15px; }
+  .filters { flex-direction: column; }
+  .filters .form-control { width: 100%; min-width: 0; }
+
+  /* Modal mobile */
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal { max-width: 100%; max-height: 95vh; border-radius: 12px 12px 0 0; margin: 0 0 0 0; }
+  .modal-header { padding: 14px 16px; }
+  .modal-header h3 { font-size: 16px; }
+  .modal-body { padding: 16px; }
+  .modal-footer { padding: 12px 16px; flex-direction: column; gap: 8px; }
+  .modal-footer .btn { width: 100%; }
+
+  /* Table mobile - scroll horizontal */
+  .table-wrap { -webkit-overflow-scrolling: touch; }
+  table { font-size: 13px; }
+  th, td { padding: 10px 12px; }
+
+  /* Mobile cards pattern */
+  .mobile-card-list { display: block !important; }
+  .mobile-card-list .m-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .mobile-card-list .m-card .m-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .mobile-card-list .m-card .m-header strong {
+    font-size: 15px;
+  }
+  .mobile-card-list .m-card .m-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 3px 0;
+    font-size: 13px;
+  }
+  .mobile-card-list .m-card .m-row .m-label {
+    color: var(--text-secondary);
+  }
+  .mobile-card-list .m-card .m-row .m-value {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .mobile-card-list .m-card .m-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .mobile-card-list .m-card .m-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    justify-content: flex-end;
+  }
+
+  /* Hide desktop table on mobile when mobile cards exist */
+  .has-mobile-cards .table-wrap { display: none; }
+
+  /* Toast mobile */
+  .toast { max-width: calc(100vw - 40px); font-size: 13px; padding: 12px 14px; }
+  #toast-container { right: 10px; top: 10px; }
 }

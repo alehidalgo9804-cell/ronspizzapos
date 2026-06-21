@@ -23,6 +23,7 @@ class TableLayoutView extends StatelessWidget {
     required this.onAssignDeliveryDriver,
     this.onLogout,
     this.onCustomers,
+    this.onUsers,
   });
 
   final List<TableInfo> tables;
@@ -35,6 +36,7 @@ class TableLayoutView extends StatelessWidget {
       onAssignDeliveryDriver;
   final VoidCallback? onLogout;
   final VoidCallback? onCustomers;
+  final VoidCallback? onUsers;
 
   Color _statusColor(TableStatus status) {
     switch (status) {
@@ -70,6 +72,7 @@ class TableLayoutView extends StatelessWidget {
       onAssignDeliveryDriver: onAssignDeliveryDriver,
       onLogout: onLogout,
       onCustomers: onCustomers,
+      onUsers: onUsers,
       statusColor: _statusColor,
       statusText: _statusText,
     );
@@ -89,6 +92,7 @@ class _TableLayoutContent extends StatefulWidget {
     required this.statusColor,
     required this.statusText,
     this.onCustomers,
+    this.onUsers,
   });
 
   final List<TableInfo> tables;
@@ -101,6 +105,7 @@ class _TableLayoutContent extends StatefulWidget {
       onAssignDeliveryDriver;
   final VoidCallback? onLogout;
   final VoidCallback? onCustomers;
+  final VoidCallback? onUsers;
   final Color Function(TableStatus) statusColor;
   final String Function(TableStatus) statusText;
 
@@ -278,6 +283,13 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
       context: context,
       builder: (context) {
         bool isPrinting = false;
+        final orderTotalValue = _orderTotal(order);
+        final paidAmount = order.paymentPaidAmount ?? 0;
+        final changeAmount =
+            paidAmount > orderTotalValue ? paidAmount - orderTotalValue : 0.0;
+        final remainingAmount =
+            paidAmount < orderTotalValue ? orderTotalValue - paidAmount : 0.0;
+
         return StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
             title: Text('${PosLabels.common.ticket} ${order.ticketNumber}'),
@@ -364,7 +376,7 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
                     const Divider(height: 1),
                     const SizedBox(height: 8),
                     Text(
-                        '${PosLabels.payment.orderTotal}: \$${_orderTotal(order).toStringAsFixed(2)}'),
+                        '${PosLabels.payment.orderTotal}: \$${orderTotalValue.toStringAsFixed(2)}'),
                     Text(
                         '${PosLabels.payment.cash}: \$${(order.paymentCashAmount ?? 0).toStringAsFixed(2)}'),
                     if ((order.paymentUsdAmount ?? 0) > 0) ...[
@@ -375,11 +387,12 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
                     ],
                     Text(
                         '${PosLabels.payment.card}: \$${(order.paymentCardAmount ?? 0).toStringAsFixed(2)}'),
-                    Text(
-                      (order.paymentBalance ?? 0) >= 0
-                          ? '${PosLabels.payment.change}: \$${(order.paymentBalance ?? 0).toStringAsFixed(2)}'
-                          : '${PosLabels.payment.remainingAmount}: \$${(order.paymentBalance ?? 0).abs().toStringAsFixed(2)}',
-                    ),
+                    if (changeAmount > 0 || remainingAmount > 0)
+                      Text(
+                        changeAmount > 0
+                            ? '${PosLabels.payment.change}: \$${changeAmount.toStringAsFixed(2)}'
+                            : '${PosLabels.payment.remainingAmount}: \$${remainingAmount.toStringAsFixed(2)}',
+                      ),
                   ],
                 ),
               ),
@@ -445,6 +458,7 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
       },
       onLogout: widget.onLogout,
       onCustomers: widget.onCustomers,
+      onUsers: widget.onUsers,
     );
   }
 

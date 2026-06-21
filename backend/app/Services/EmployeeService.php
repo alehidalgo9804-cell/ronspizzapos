@@ -12,4 +12,9 @@ final class EmployeeService extends BaseCrudService
     {
         parent::__construct(new EmployeeRepository());
     }
+
+    public function listByRoles(int $sucursalId, array $roles, int $limit = 500): array
+    {
+        return $this->repository->listByRoles($sucursalId, $roles, $limit);
+    }
 }

@@ -1,0 +1,20 @@
+        RONS PIZZA
+------------------------------------------
+Ticket: 00042
+Cajero: ALEX
+Hora: 31/05/2026 00:19
+Tipo: Dine In
+Mesa: 15
+------------------------------------------
+Nombre                Cant   Precio    Total
+PIZZA MEDIANA            1  $159.00  $159.00
+  - 1/2 HAWAIANA - 1/2 PEPPERONI
+REFRESCO 600ML           2   $25.00   $50.00
+------------------------------------------
+TOTAL                               $209.00
+EFECTIVO                            $209.00
+CAMBIO                               $0.00
+------------------------------------------
+      Gracias por su compra
+
+

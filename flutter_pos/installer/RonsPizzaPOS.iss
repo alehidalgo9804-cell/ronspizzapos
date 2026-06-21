@@ -1,5 +1,7 @@
-﻿#define AppName "Rons Pizza POS"
-#define AppVersion "1.0.0"
+#define AppName "Rons Pizza POS"
+#ifndef AppVersion
+  #define AppVersion "1.0.0"
+#endif
 #define AppPublisher "Rons Pizza"
 #define AppExeName "rons_pizza_pos.exe"
 
@@ -51,3 +53,4 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+

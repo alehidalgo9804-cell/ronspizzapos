@@ -55,6 +55,7 @@ final class OrderService
 
         try {
             $subtotal = 0.0;
+            $resolvedMesaId = $this->resolveMesaId($db, $sucursalId, $payload, null);
 
             $orderId = $this->orders->create([
                 // Folio temporal unico: se reemplaza inmediatamente por #00000 basado en ID real.
@@ -64,7 +65,7 @@ final class OrderService
                 'cliente_id' => $payload['cliente_id'] ?? null,
                 'direccion_cliente_id' => $payload['direccion_cliente_id'] ?? null,
                 'repartidor_id' => $payload['repartidor_id'] ?? null,
-                'mesa_id' => $payload['mesa_id'] ?? null,
+                'mesa_id' => $resolvedMesaId,
                 'tipo_pedido' => $payload['tipo_pedido'] ?? 'recoger',
                 'canal_origen' => $payload['canal_origen'] ?? 'caja',
                 'estado' => 'creado',
@@ -79,13 +80,13 @@ final class OrderService
                 'moneda_base' => $payload['moneda_base'] ?? 'MXN',
                 'tipo_cambio_usd_utilizado' => $payload['tipo_cambio_usd_utilizado'] ?? null,
                 'observaciones' => $payload['observaciones'] ?? null,
-                'payload_resumen_json' => json_encode([
+                'payload_resumen_json' => json_encode(array_merge([
                     'source' => $payload['canal_origen'] ?? 'caja',
                     'tipo_pedido' => $payload['tipo_pedido'] ?? 'recoger',
                     'mesa_label' => $payload['mesa_label'] ?? null,
                     'ticket_number' => $payload['ticket_number'] ?? null,
                     'customer_or_table' => $payload['customer_or_table'] ?? null,
-                ], JSON_UNESCAPED_UNICODE),
+                ], $this->buildGuestsSummary($payload)), JSON_UNESCAPED_UNICODE),
                 'fecha_pedido' => date('Y-m-d H:i:s'),
             ]);
 
@@ -152,11 +153,23 @@ public function update(int $orderId, array $payload, int $usuarioId, int $sucurs
     $db->beginTransaction();
 
     try {
+        $existingMesaId = isset($existing['mesa_id']) ? (int) $existing['mesa_id'] : null;
+        $resolvedMesaId = $this->resolveMesaId($db, $sucursalId, $payload, $existingMesaId);
+
+        $existingSummary = [];
+        $existingSummaryRaw = $existing['payload_resumen_json'] ?? null;
+        if (is_string($existingSummaryRaw) && $existingSummaryRaw !== '') {
+            $decodedSummary = json_decode($existingSummaryRaw, true);
+            if (is_array($decodedSummary)) {
+                $existingSummary = $decodedSummary;
+            }
+        }
+
         $this->orders->update($orderId, [
             'cliente_id' => $payload['cliente_id'] ?? null,
             'direccion_cliente_id' => $payload['direccion_cliente_id'] ?? null,
             'repartidor_id' => $payload['repartidor_id'] ?? null,
-            'mesa_id' => $payload['mesa_id'] ?? null,
+            'mesa_id' => $resolvedMesaId,
             'tipo_pedido' => $payload['tipo_pedido'] ?? ($existing['tipo_pedido'] ?? 'recoger'),
             'canal_origen' => $payload['canal_origen'] ?? ($existing['canal_origen'] ?? 'caja'),
             'descuento_total' => $payload['descuento_total'] ?? ($existing['descuento_total'] ?? 0),
@@ -165,13 +178,13 @@ public function update(int $orderId, array $payload, int $usuarioId, int $sucurs
             'moneda_base' => $payload['moneda_base'] ?? ($existing['moneda_base'] ?? 'MXN'),
             'tipo_cambio_usd_utilizado' => $payload['tipo_cambio_usd_utilizado'] ?? ($existing['tipo_cambio_usd_utilizado'] ?? null),
             'observaciones' => $payload['observaciones'] ?? ($existing['observaciones'] ?? null),
-            'payload_resumen_json' => json_encode([
+            'payload_resumen_json' => json_encode(array_merge([
                 'source' => $payload['canal_origen'] ?? ($existing['canal_origen'] ?? 'caja'),
                 'tipo_pedido' => $payload['tipo_pedido'] ?? ($existing['tipo_pedido'] ?? 'recoger'),
-                'mesa_label' => $payload['mesa_label'] ?? null,
-                'ticket_number' => $payload['ticket_number'] ?? null,
-                'customer_or_table' => $payload['customer_or_table'] ?? null,
-            ], JSON_UNESCAPED_UNICODE),
+                'mesa_label' => $payload['mesa_label'] ?? ($existingSummary['mesa_label'] ?? null),
+                'ticket_number' => $payload['ticket_number'] ?? ($existingSummary['ticket_number'] ?? null),
+                'customer_or_table' => $payload['customer_or_table'] ?? ($existingSummary['customer_or_table'] ?? null),
+            ], $this->buildGuestsSummary($payload, $existingSummary)), JSON_UNESCAPED_UNICODE),
         ]);
 
         $deleteItemsStmt = $db->prepare('DELETE FROM pedido_items WHERE pedido_id = :pedido_id');
@@ -279,6 +292,85 @@ public function update(int $orderId, array $payload, int $usuarioId, int $sucurs
         $this->recalculateOrder($orderId);
 
         return $this->orders->findWithItems($orderId) ?? [];
+    }
+
+    public function findActiveTableOrder(int $sucursalId, ?int $mesaId, string $mesaLabel): ?array
+    {
+        $closedStatuses = ['entregado', 'cancelado', 'cerrado', 'paid', 'completed', 'closed', 'closed_without_payment'];
+        $placeholders = implode(',', array_fill(0, count($closedStatuses), '?'));
+
+        $db = Database::connection();
+
+        // Buscar por mesa_id primero si es valido
+        if ($mesaId !== null && $mesaId > 0) {
+            $sql = "SELECT id FROM pedidos
+                    WHERE sucursal_id = ?
+                      AND tipo_pedido = 'mesa'
+                      AND mesa_id = ?
+                      AND estado NOT IN ({$placeholders})
+                    ORDER BY id DESC
+                    LIMIT 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute(array_merge([$sucursalId, $mesaId], $closedStatuses));
+            $row = $stmt->fetch();
+            if ($row !== false) {
+                return $this->get((int) $row['id']);
+            }
+        }
+
+        // Fallback por mesa_label en payload_resumen_json
+        if ($mesaLabel !== '') {
+            $sql = "SELECT id FROM pedidos
+                    WHERE sucursal_id = ?
+                      AND tipo_pedido = 'mesa'
+                      AND JSON_UNQUOTE(JSON_EXTRACT(payload_resumen_json, '$.mesa_label')) = ?
+                      AND estado NOT IN ({$placeholders})
+                    ORDER BY id DESC
+                    LIMIT 1";
+            $stmt = $db->prepare($sql);
+            $stmt->execute(array_merge([$sucursalId, $mesaLabel], $closedStatuses));
+            $row = $stmt->fetch();
+            if ($row !== false) {
+                return $this->get((int) $row['id']);
+            }
+        }
+
+        return null;
+    }
+
+    public function addItems(int $orderId, array $items, int $usuarioId): array
+    {
+        $order = $this->orders->find($orderId);
+        if ($order === null) {
+            throw new Exception('Order not found');
+        }
+
+        $db = Database::connection();
+        $db->beginTransaction();
+
+        try {
+            foreach ($items as $item) {
+                $this->createOrderItem($db, $orderId, $item);
+            }
+            $this->recalculateOrder($orderId);
+
+            $history = $db->prepare('INSERT INTO pedido_estados_historial (pedido_id, estado_anterior, estado_nuevo, usuario_id, observaciones, created_at) VALUES (:pedido_id, :estado_anterior, :estado_nuevo, :usuario_id, :observaciones, NOW())');
+            $history->execute([
+                'pedido_id' => $orderId,
+                'estado_anterior' => $order['estado'],
+                'estado_nuevo' => $order['estado'],
+                'usuario_id' => $usuarioId,
+                'observaciones' => 'Items agregados desde QR',
+            ]);
+
+            $db->commit();
+            return $this->get($orderId) ?? [];
+        } catch (Exception $exception) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $exception;
+        }
     }
 
     public function assignDriver(int $orderId, ?int $driverId, int $usuarioId): array
@@ -1082,6 +1174,70 @@ public function update(int $orderId, array $payload, int $usuarioId, int $sucurs
         return $zoneRow !== false ? (float) $zoneRow['tarifa_envio'] : 0.0;
     }
 
+    private function resolveMesaId(PDO $db, int $sucursalId, array $payload, ?int $fallbackMesaId): ?int
+    {
+        $mesaId = isset($payload['mesa_id']) ? (int) $payload['mesa_id'] : 0;
+        if ($mesaId > 0) {
+            $mesaStmt = $db->prepare(
+                'SELECT id
+                 FROM mesas
+                 WHERE id = :id
+                   AND sucursal_id = :sucursal_id
+                 LIMIT 1'
+            );
+            $mesaStmt->execute([
+                'id' => $mesaId,
+                'sucursal_id' => $sucursalId,
+            ]);
+            if ($mesaStmt->fetch(PDO::FETCH_ASSOC) !== false) {
+                return $mesaId;
+            }
+        }
+
+        $mesaLabel = trim((string) ($payload['mesa_label'] ?? ''));
+        if ($mesaLabel !== '') {
+            $mesaByLabelStmt = $db->prepare(
+                'SELECT id
+                 FROM mesas
+                 WHERE sucursal_id = :sucursal_id
+                   AND (
+                        CAST(numero AS CHAR) = :mesa_label_num
+                        OR LOWER(COALESCE(nombre, "")) = LOWER(:mesa_label_name)
+                   )
+                 ORDER BY id ASC
+                 LIMIT 1'
+            );
+            $mesaByLabelStmt->execute([
+                'sucursal_id' => $sucursalId,
+                'mesa_label_num' => $mesaLabel,
+                'mesa_label_name' => $mesaLabel,
+            ]);
+            $row = $mesaByLabelStmt->fetch(PDO::FETCH_ASSOC);
+            if ($row !== false) {
+                return (int) $row['id'];
+            }
+        }
+
+        if ($fallbackMesaId !== null && $fallbackMesaId > 0) {
+            $fallbackStmt = $db->prepare(
+                'SELECT id
+                 FROM mesas
+                 WHERE id = :id
+                   AND sucursal_id = :sucursal_id
+                 LIMIT 1'
+            );
+            $fallbackStmt->execute([
+                'id' => $fallbackMesaId,
+                'sucursal_id' => $sucursalId,
+            ]);
+            if ($fallbackStmt->fetch(PDO::FETCH_ASSOC) !== false) {
+                return $fallbackMesaId;
+            }
+        }
+
+        return null;
+    }
+
     private function createOrderItem(PDO $db, int $orderId, array $item): array
     {
         $isManual = (int) ($item['es_item_manual'] ?? 0) === 1 || !isset($item['producto_id']);
@@ -1131,6 +1287,7 @@ public function update(int $orderId, array $payload, int $usuarioId, int $sucurs
             'notas' => $item['notas'] ?? null,
             'estado' => 'pendiente',
             'impresora_destino_id' => $isManual ? null : ($product['impresora_destino_id'] ?? null),
+            'guest_id' => isset($item['guest_id']) ? (int) $item['guest_id'] : null,
         ]);
 
         if (isset($item['pizza_config']) && is_array($item['pizza_config'])) {
@@ -1194,5 +1351,38 @@ public function update(int $orderId, array $payload, int $usuarioId, int $sucurs
         }
 
         return (string) preg_replace('/\s+/u', ' ', $value);
+    }
+
+    private function buildGuestsSummary(array $payload, array $existingSummary = []): array
+    {
+        $guests = $payload['guests'] ?? ($existingSummary['guests'] ?? null);
+        if (!is_array($guests) || $guests === []) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($guests as $guest) {
+            if (!is_array($guest)) {
+                continue;
+            }
+            $id = isset($guest['id']) ? (int) $guest['id'] : 1;
+            $name = isset($guest['name']) && (string) $guest['name'] !== ''
+                ? (string) $guest['name']
+                : ('Cliente ' . $id);
+            $normalized[] = ['id' => $id, 'name' => $name];
+        }
+
+        if ($normalized === []) {
+            return [];
+        }
+
+        $currentGuestId = isset($payload['current_guest_id'])
+            ? (int) $payload['current_guest_id']
+            : ($existingSummary['current_guest_id'] ?? $normalized[0]['id']);
+
+        return [
+            'guests' => $normalized,
+            'current_guest_id' => $currentGuestId,
+        ];
     }
 }

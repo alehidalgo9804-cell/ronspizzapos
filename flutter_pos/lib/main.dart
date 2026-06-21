@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'core/platform/printer_manager.dart';
 import 'presentation/figma/figma_pos_shell.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await PrinterManager.instance.loadConfiguration();
   runApp(const RonsPizzaPosApp());
 }
 

@@ -49,13 +49,16 @@ function renderFiltros() {
 
 function renderTabla() {
   const tbody = document.getElementById('usuarios-body');
+  const cardContainer = document.getElementById('usuarios-mobile-list');
   if (!tbody) return;
 
   if (usuariosData.length === 0) {
     tbody.innerHTML = `<tr><td colspan="7" class="text-muted" style="text-align:center;padding:24px;">No hay usuarios registrados</td></tr>`;
+    if (cardContainer) cardContainer.innerHTML = '';
     return;
   }
 
+  // Desktop table
   tbody.innerHTML = usuariosData.map(u => {
     const badgeClass = `badge-${u.rol_nombre || 'cajero'}`;
     return `
@@ -73,6 +76,28 @@ function renderTabla() {
       </tr>
     `;
   }).join('');
+
+  // Mobile cards
+  if (cardContainer) {
+    cardContainer.innerHTML = usuariosData.map(u => {
+      const badgeClass = `badge-${u.rol_nombre || 'cajero'}`;
+      return `
+        <div class="m-card">
+          <div class="m-header">
+            <strong>${escapeHtml(u.nombre || '')} ${escapeHtml(u.apellido || '')}</strong>
+            <span class="badge ${badgeClass}">${escapeHtml(u.rol_nombre)}</span>
+          </div>
+          <div class="m-row"><span class="m-label">Usuario</span><span class="m-value">${escapeHtml(u.usuario)}</span></div>
+          <div class="m-row"><span class="m-label">Sucursal</span><span class="m-value">${escapeHtml(u.sucursal_nombre || '-')}</span></div>
+          <div class="m-row"><span class="m-label">Estado</span><span class="m-value">${u.activo ? 'Activo' : 'Inactivo'}</span></div>
+          <div class="m-actions">
+            <button class="btn btn-sm btn-secondary" onclick="editarUsuario(${u.id})">Editar</button>
+            <button class="btn btn-sm btn-danger" onclick="eliminarUsuario(${u.id})">Eliminar</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
 }
 
 function abrirModalCrear() {

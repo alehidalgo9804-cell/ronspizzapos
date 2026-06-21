@@ -5,6 +5,9 @@ enum PrinterDriver {
 
   /// Impresora térmica Windows (ESC/POS) vía MethodChannel.
   thermalWindows,
+
+  /// Impresora térmica de red (ESC/POS) vía socket TCP directo.
+  networkEscPos,
 }
 
 /// Extensión para nombres legibles del driver.
@@ -15,6 +18,8 @@ extension PrinterDriverLabel on PrinterDriver {
         return 'PDF (Guardar / Vista previa)';
       case PrinterDriver.thermalWindows:
         return 'Térmica Windows (ESC/POS)';
+      case PrinterDriver.networkEscPos:
+        return 'Térmica Red (ESC/POS)';
     }
   }
 }
@@ -66,12 +71,20 @@ class PosPrinter {
   bool enabled;
   PrinterPaperWidth paperWidth;
 
+  /// IP de la impresora de red. Solo aplica para [PrinterDriver.networkEscPos].
+  String ip;
+
+  /// Puerto de la impresora de red. Solo aplica para [PrinterDriver.networkEscPos].
+  int port;
+
   PosPrinter({
     required this.id,
     required this.name,
     this.driver = PrinterDriver.pdf,
     this.enabled = true,
     this.paperWidth = PrinterPaperWidth.mm58,
+    this.ip = '',
+    this.port = 9100,
   });
 
   PosPrinter copyWith({
@@ -79,6 +92,8 @@ class PosPrinter {
     PrinterDriver? driver,
     bool? enabled,
     PrinterPaperWidth? paperWidth,
+    String? ip,
+    int? port,
   }) {
     return PosPrinter(
       id: id,
@@ -86,6 +101,8 @@ class PosPrinter {
       driver: driver ?? this.driver,
       enabled: enabled ?? this.enabled,
       paperWidth: paperWidth ?? this.paperWidth,
+      ip: ip ?? this.ip,
+      port: port ?? this.port,
     );
   }
 }
