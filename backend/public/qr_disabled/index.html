@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#2563EB">
+  <title>Rons Pizza - Pedido</title>
+  <link rel="stylesheet" href="css/qr.css">
+</head>
+<body>
+  <div id="app">
+    <div class="loading">
+      <div class="spinner"></div>
+      <p>Cargando menu...</p>
+    </div>
+  </div>
+
+  <!-- Drawer Carrito -->
+  <div id="cart-root">
+    <div class="drawer-overlay" id="cart-overlay" onclick="closeCart()"></div>
+    <div class="drawer" id="cart-drawer">
+      <div class="drawer-header">
+        <h3>Tu Pedido</h3>
+        <button class="drawer-close" onclick="closeCart()">&times;</button>
+      </div>
+      <div class="drawer-body" id="cart-body"></div>
+      <div class="drawer-footer" id="cart-footer"></div>
+    </div>
+  </div>
+
+  <!-- Modal Configurador -->
+  <div id="config-root">
+    <div class="modal-overlay" id="config-overlay" onclick="closeConfig()"></div>
+    <div class="config-modal" id="config-modal">
+      <div class="config-modal-header">
+        <h3 id="config-title">Configurar</h3>
+        <button class="drawer-close" onclick="closeConfig()">&times;</button>
+      </div>
+      <div class="config-modal-body" id="config-body"></div>
+      <div class="config-modal-footer" id="config-footer"></div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="js/qr.js"></script>
+</body>
+</html>

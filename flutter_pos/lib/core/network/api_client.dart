@@ -74,6 +74,25 @@ class ApiClient {
     }
   }
 
+  Future<Map<String, dynamic>> delete(String path) async {
+    try {
+      final response = await http
+          .delete(Uri.parse('${AppConfig.apiUrl}$path'), headers: _headers())
+          .timeout(_timeout);
+      return _decode(response.statusCode, response.body);
+    } on TimeoutException {
+      return <String, dynamic>{
+        'success': false,
+        'message': 'Timeout al conectar con API (${AppConfig.apiUrl})',
+      };
+    } catch (_) {
+      return <String, dynamic>{
+        'success': false,
+        'message': 'No se pudo conectar con API (${AppConfig.apiUrl})',
+      };
+    }
+  }
+
   Map<String, String> _headers() {
     final headers = <String, String>{'Content-Type': 'application/json'};
     if (token != null && token!.isNotEmpty) {

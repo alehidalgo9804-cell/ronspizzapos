@@ -17,7 +17,9 @@ class WhatsAppDeliveryMessagePayload {
     required this.phone,
     required this.address,
     required this.items,
+    required this.subtotal,
     required this.total,
+    this.shippingCost = 0,
     this.reference,
     this.mapsLink,
     this.observations,
@@ -30,7 +32,9 @@ class WhatsAppDeliveryMessagePayload {
   final String? reference;
   final String? mapsLink;
   final List<WhatsAppOrderLineItem> items;
+  final double subtotal;
   final double total;
+  final double shippingCost;
   final String? observations;
 }
 
@@ -82,6 +86,10 @@ String buildWhatsAppDeliveryMessage(WhatsAppDeliveryMessagePayload payload) {
   }
   addLine('');
 
+  addLine('Subtotal: \$${payload.subtotal.toStringAsFixed(2)}');
+  if (payload.shippingCost > 0) {
+    addLine('Envío: \$${payload.shippingCost.toStringAsFixed(2)}');
+  }
   addLine('Total: \$${payload.total.toStringAsFixed(2)}');
   addLine('');
 

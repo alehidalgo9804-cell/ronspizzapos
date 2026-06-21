@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS clientes (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(120) NOT NULL,
   apellidos VARCHAR(120) NULL,
-  telefono VARCHAR(25) NOT NULL,
+  telefono VARCHAR(25) NULL,
   telefono_alterno VARCHAR(25) NULL,
   email VARCHAR(120) NULL,
   notas TEXT NULL,
@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS clientes (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_at DATETIME NULL,
-  UNIQUE KEY uq_clientes_telefono (telefono),
   KEY idx_clientes_telefono (telefono)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

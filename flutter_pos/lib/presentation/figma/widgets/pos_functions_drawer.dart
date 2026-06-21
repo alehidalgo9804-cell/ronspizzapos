@@ -1,9 +1,14 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+
+import '../../../core/session/app_session.dart';
 
 Future<void> showPosFunctionsDrawer(
   BuildContext context, {
   VoidCallback? onCreateReport,
+  VoidCallback? onPrinterSettings,
   VoidCallback? onLogout,
+  VoidCallback? onCustomers,
+  VoidCallback? onUsers,
 }) async {
   await showGeneralDialog<void>(
     context: context,
@@ -23,7 +28,10 @@ Future<void> showPosFunctionsDrawer(
               height: double.infinity,
               child: _PosFunctionsPanel(
                 onCreateReport: onCreateReport,
+                onPrinterSettings: onPrinterSettings,
                 onLogout: onLogout,
+                onCustomers: onCustomers,
+                onUsers: onUsers,
               ),
             ),
           ),
@@ -41,10 +49,15 @@ Future<void> showPosFunctionsDrawer(
 }
 
 class _PosFunctionsPanel extends StatelessWidget {
-  const _PosFunctionsPanel({this.onCreateReport, this.onLogout});
+  const _PosFunctionsPanel({this.onCreateReport, this.onPrinterSettings, this.onLogout, this.onCustomers, this.onUsers});
 
   final VoidCallback? onCreateReport;
+  final VoidCallback? onPrinterSettings;
   final VoidCallback? onLogout;
+  final VoidCallback? onCustomers;
+  final VoidCallback? onUsers;
+
+  bool get _isAdmin => AppSession.instance.role?.toLowerCase() == 'admin';
 
   @override
   Widget build(BuildContext context) {
@@ -113,16 +126,54 @@ class _PosFunctionsPanel extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: [
+              if (_isAdmin) ...[
+                item(
+                  icon: Icons.people_outline,
+                  label: 'Usuarios',
+                  onTap: onUsers,
+                ),
+              ],
+              item(
+                icon: Icons.contacts_outlined,
+                label: 'Clientes',
+                onTap: onCustomers,
+              ),
+              if (_isAdmin) ...[
+                item(
+                  icon: Icons.receipt_long_outlined,
+                  label: 'Recibos',
+                  onTap: () => _showPlaceholder(context, 'Recibos'),
+                ),
+              ],
               item(
                 icon: Icons.assessment_outlined,
-                label: 'Crear reporte',
+                label: 'Reportes',
                 onTap: onCreateReport,
+              ),
+              if (_isAdmin) ...[
+                item(
+                  icon: Icons.store_outlined,
+                  label: 'Sucursales',
+                  onTap: () => _showPlaceholder(context, 'Sucursales'),
+                ),
+              ],
+              const Divider(height: 24, indent: 16, endIndent: 16),
+              item(
+                icon: Icons.print_outlined,
+                label: 'Impresora',
+                onTap: onPrinterSettings,
               ),
               item(icon: Icons.logout, label: 'Cerrar sesión', onTap: onLogout),
             ],
           ),
         ),
       ],
+    );
+  }
+
+  void _showPlaceholder(BuildContext context, String feature) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$feature estará disponible en una próxima fase.')),
     );
   }
 }

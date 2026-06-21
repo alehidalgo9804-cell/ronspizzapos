@@ -1,4 +1,4 @@
-enum PosView { tables, pos, payment }
+enum PosView { tables, pos, payment, customers, users, branches }
 
 enum TableStatus { available, occupied, awaitingPayment }
 
@@ -130,6 +130,7 @@ class OrderItemData {
     this.saladConfig,
     this.spaghettiConfig,
     this.garlicBreadConfig,
+    this.sentToKitchen = false,
   });
 
   final String id;
@@ -145,6 +146,7 @@ class OrderItemData {
   final SaladConfigData? saladConfig;
   final SpaghettiConfigData? spaghettiConfig;
   final GarlicBreadConfigData? garlicBreadConfig;
+  final bool sentToKitchen;
 
   OrderItemData copyWith({
     String? id,
@@ -161,6 +163,7 @@ class OrderItemData {
     SaladConfigData? saladConfig,
     SpaghettiConfigData? spaghettiConfig,
     GarlicBreadConfigData? garlicBreadConfig,
+    bool? sentToKitchen,
   }) {
     return OrderItemData(
       id: id ?? this.id,
@@ -176,6 +179,7 @@ class OrderItemData {
       saladConfig: saladConfig ?? this.saladConfig,
       spaghettiConfig: spaghettiConfig ?? this.spaghettiConfig,
       garlicBreadConfig: garlicBreadConfig ?? this.garlicBreadConfig,
+      sentToKitchen: sentToKitchen ?? this.sentToKitchen,
     );
   }
 }
@@ -201,6 +205,7 @@ class PizzaConfigData {
     this.crustHalf1,
     this.crustHalf2,
     this.includePromoGarlicBread = false,
+    this.promoPizzaMediana = false,
   });
 
   final String specialty;
@@ -222,6 +227,7 @@ class PizzaConfigData {
   final String? crustHalf1;
   final String? crustHalf2;
   final bool includePromoGarlicBread;
+  final bool promoPizzaMediana;
 }
 
 class HamburgerUnitConfigData {
@@ -541,6 +547,7 @@ OrderPricingSummary calculateOrderPricing(List<OrderItemData> items) {
   for (final item in items) {
     final config = item.pizzaConfig;
     if (config == null) continue;
+    if (config.promoPizzaMediana) continue;
     if (!_equalsNormalized(config.size, 'Mediana')) continue;
     for (var i = 0; i < item.quantity; i++) {
       mediumPizzas.add(_PizzaPromoUnit(item: item, config: config));
@@ -700,4 +707,139 @@ class _PromoComputation {
 
   final double totalDiscount;
   final int pairCount;
+}
+
+class CustomerData {
+  const CustomerData({
+    required this.id,
+    required this.name,
+    this.lastName,
+    this.phone,
+    this.phoneAlt,
+    this.email,
+    this.notes,
+    this.active = true,
+    this.totalAddresses = 0,
+  });
+
+  factory CustomerData.fromJson(Map<String, dynamic> json) {
+    return CustomerData(
+      id: json['id'] as int? ?? 0,
+      name: json['nombre'] as String? ?? '',
+      lastName: json['apellidos'] as String?,
+      phone: json['telefono'] as String?,
+      phoneAlt: json['telefono_alterno'] as String?,
+      email: json['email'] as String?,
+      notes: json['notas'] as String?,
+      active: (json['activo'] as int? ?? 1) == 1,
+      totalAddresses: json['total_direcciones'] as int? ?? 0,
+    );
+  }
+
+  final int id;
+  final String name;
+  final String? lastName;
+  final String? phone;
+  final String? phoneAlt;
+  final String? email;
+  final String? notes;
+  final bool active;
+  final int totalAddresses;
+
+  String get displayName {
+    final parts = <String>[name];
+    final last = lastName?.trim();
+    if (last != null && last.isNotEmpty) parts.add(last);
+    return parts.join(' ');
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'nombre': name,
+      if (lastName != null && lastName!.isNotEmpty) 'apellidos': lastName,
+      if (phone != null && phone!.isNotEmpty) 'telefono': phone,
+      if (phoneAlt != null && phoneAlt!.isNotEmpty) 'telefono_alterno': phoneAlt,
+      if (email != null && email!.isNotEmpty) 'email': email,
+      if (notes != null && notes!.isNotEmpty) 'notas': notes,
+    };
+  }
+}
+
+class CustomerAddressData {
+  const CustomerAddressData({
+    required this.id,
+    required this.customerId,
+    this.alias,
+    this.street,
+    this.exteriorNumber,
+    this.interiorNumber,
+    this.neighborhood,
+    this.city,
+    this.state,
+    this.postalCode,
+    this.reference,
+    this.deliveryNotes,
+    this.latitude,
+    this.longitude,
+    this.placeId,
+    this.active = true,
+  });
+
+  factory CustomerAddressData.fromJson(Map<String, dynamic> json) {
+    return CustomerAddressData(
+      id: json['id'] as int? ?? 0,
+      customerId: json['cliente_id'] as int? ?? 0,
+      alias: json['alias'] as String?,
+      street: json['calle'] as String?,
+      exteriorNumber: json['numero_exterior'] as String?,
+      interiorNumber: json['numero_interior'] as String?,
+      neighborhood: json['colonia'] as String?,
+      city: json['ciudad'] as String?,
+      state: json['estado'] as String?,
+      postalCode: json['codigo_postal'] as String?,
+      reference: json['referencia'] as String?,
+      deliveryNotes: json['instrucciones_entrega'] as String?,
+      latitude: (json['lat'] as num?)?.toDouble(),
+      longitude: (json['lng'] as num?)?.toDouble(),
+      placeId: json['place_id'] as String?,
+      active: (json['activa'] as int? ?? 1) == 1,
+    );
+  }
+
+  final int id;
+  final int customerId;
+  final String? alias;
+  final String? street;
+  final String? exteriorNumber;
+  final String? interiorNumber;
+  final String? neighborhood;
+  final String? city;
+  final String? state;
+  final String? postalCode;
+  final String? reference;
+  final String? deliveryNotes;
+  final double? latitude;
+  final double? longitude;
+  final String? placeId;
+  final bool active;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'cliente_id': customerId,
+      if (alias != null && alias!.isNotEmpty) 'alias': alias,
+      if (street != null && street!.isNotEmpty) 'calle': street,
+      if (exteriorNumber != null && exteriorNumber!.isNotEmpty) 'numero_exterior': exteriorNumber,
+      if (interiorNumber != null && interiorNumber!.isNotEmpty) 'numero_interior': interiorNumber,
+      if (neighborhood != null && neighborhood!.isNotEmpty) 'colonia': neighborhood,
+      if (city != null && city!.isNotEmpty) 'ciudad': city,
+      if (state != null && state!.isNotEmpty) 'estado': state,
+      if (postalCode != null && postalCode!.isNotEmpty) 'codigo_postal': postalCode,
+      if (reference != null && reference!.isNotEmpty) 'referencia': reference,
+      if (deliveryNotes != null && deliveryNotes!.isNotEmpty) 'instrucciones_entrega': deliveryNotes,
+      if (latitude != null) 'lat': latitude,
+      if (longitude != null) 'lng': longitude,
+      if (placeId != null && placeId!.isNotEmpty) 'place_id': placeId,
+      'activa': active ? 1 : 0,
+    };
+  }
 }

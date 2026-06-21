@@ -1,0 +1,14 @@
+        COMANDA COCINA
+
+Mesa: 15
+Recibo No.: 19315
+Area: FREIDORAS Y PLANCHA
+Mesero: ALEX
+Enviado: 31 mayo 2026 00:19
+------------------------------------------
+PRODUCTO                           CANT.
+------------------------------------------
+ENSALADA                             1
+------------------------------------------
+Comentarios:
+Sin cebolla, aderezo aparte

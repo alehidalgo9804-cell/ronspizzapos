@@ -63,7 +63,41 @@ final class OrderRepository extends BaseRepository
                 u.nombre AS cajero_nombre,
                 u.apellido AS cajero_apellidos,
                 r.nombre AS repartidor_nombre,
-                r.apellidos AS repartidor_apellidos
+                r.apellidos AS repartidor_apellidos,
+                (
+                    SELECT COALESCE(SUM(pa.monto_mxn_equivalente), 0)
+                    FROM pagos pa
+                    JOIN metodos_pago mp ON mp.id = pa.metodo_pago_id
+                    WHERE pa.pedido_id = p.id
+                      AND pa.estado = 'aplicado'
+                      AND mp.clave = 'efectivo'
+                ) AS payment_cash_amount,
+                (
+                    SELECT COALESCE(SUM(pa.monto), 0)
+                    FROM pagos pa
+                    JOIN metodos_pago mp ON mp.id = pa.metodo_pago_id
+                    WHERE pa.pedido_id = p.id
+                      AND pa.estado = 'aplicado'
+                      AND mp.clave = 'usd'
+                ) AS payment_usd_amount,
+                (
+                    SELECT COALESCE(SUM(pa.monto_mxn_equivalente), 0)
+                    FROM pagos pa
+                    JOIN metodos_pago mp ON mp.id = pa.metodo_pago_id
+                    WHERE pa.pedido_id = p.id
+                      AND pa.estado = 'aplicado'
+                      AND mp.clave = 'tarjeta'
+                ) AS payment_card_amount,
+                (
+                    SELECT pa.tipo_cambio
+                    FROM pagos pa
+                    JOIN metodos_pago mp ON mp.id = pa.metodo_pago_id
+                    WHERE pa.pedido_id = p.id
+                      AND pa.estado = 'aplicado'
+                      AND mp.clave = 'usd'
+                    ORDER BY pa.id DESC
+                    LIMIT 1
+                ) AS payment_usd_exchange_rate
             FROM pedidos p
             LEFT JOIN clientes c ON c.id = p.cliente_id
             LEFT JOIN direcciones_cliente dc ON dc.id = p.direccion_cliente_id

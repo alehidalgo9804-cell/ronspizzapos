@@ -6,11 +6,13 @@ class PosPinLoginView extends StatefulWidget {
     required this.isLoading,
     required this.onSubmitPin,
     this.errorMessage,
+    this.branches,
   });
 
   final bool isLoading;
   final String? errorMessage;
-  final Future<void> Function(String pin) onSubmitPin;
+  final List<Map<String, dynamic>>? branches;
+  final Future<void> Function(String pin, int branchId) onSubmitPin;
 
   @override
   State<PosPinLoginView> createState() => _PosPinLoginViewState();
@@ -18,6 +20,17 @@ class PosPinLoginView extends StatefulWidget {
 
 class _PosPinLoginViewState extends State<PosPinLoginView> {
   final TextEditingController _pinController = TextEditingController();
+  int? _selectedBranchId;
+
+  @override
+  void initState() {
+    super.initState();
+    final branches = widget.branches;
+    if (branches != null && branches.isNotEmpty) {
+      final firstId = branches.first['id'];
+      _selectedBranchId = firstId is int ? firstId : int.tryParse('$firstId');
+    }
+  }
 
   @override
   void dispose() {
@@ -28,11 +41,16 @@ class _PosPinLoginViewState extends State<PosPinLoginView> {
   Future<void> _submit() async {
     final pin = _pinController.text.trim();
     if (pin.isEmpty || widget.isLoading) return;
-    await widget.onSubmitPin(pin);
+    if (_selectedBranchId == null || _selectedBranchId! <= 0) {
+      return;
+    }
+    await widget.onSubmitPin(pin, _selectedBranchId!);
   }
 
   @override
   Widget build(BuildContext context) {
+    final branches = widget.branches ?? [];
+
     return Scaffold(
       backgroundColor: const Color(0xFFE5E7EB),
       body: Center(
@@ -57,6 +75,34 @@ class _PosPinLoginViewState extends State<PosPinLoginView> {
                     style: TextStyle(fontSize: 14, color: Color(0xFF6B7280)),
                   ),
                   const SizedBox(height: 18),
+                  if (branches.isNotEmpty) ...[
+                    DropdownButtonFormField<int>(
+                      key: ValueKey<int?>(_selectedBranchId),
+                      initialValue: _selectedBranchId,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Sucursal',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      items: branches.map((b) {
+                        final id = b['id'] is int
+                            ? b['id'] as int
+                            : int.tryParse('${b['id']}') ?? 0;
+                        final name = '${b['nombre'] ?? b['name'] ?? 'Sucursal'}';
+                        return DropdownMenuItem<int>(
+                          value: id,
+                          child: Text(name),
+                        );
+                      }).toList(),
+                      onChanged: (id) {
+                        if (id != null) {
+                          setState(() => _selectedBranchId = id);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   TextField(
                     controller: _pinController,
                     obscureText: true,

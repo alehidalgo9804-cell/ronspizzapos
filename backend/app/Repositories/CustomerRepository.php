@@ -13,12 +13,16 @@ final class CustomerRepository extends BaseRepository
         parent::__construct('clientes');
     }
 
-    public function findByPhone(string $phone): ?array
+    public function findByPhone(?string $phone): ?array
     {
         $normalizedInput = preg_replace('/\D+/', '', $phone ?? '') ?? '';
         $normalizedInput = trim($normalizedInput);
 
-        $stmt = $this->db->prepare('SELECT * FROM clientes WHERE telefono = :telefono LIMIT 1');
+        if ($normalizedInput === '') {
+            return null;
+        }
+
+        $stmt = $this->db->prepare('SELECT * FROM clientes WHERE deleted_at IS NULL AND telefono = :telefono LIMIT 1');
         $stmt->execute(['telefono' => $phone]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -26,20 +30,77 @@ final class CustomerRepository extends BaseRepository
             return $row;
         }
 
-        if ($normalizedInput === '') {
+        $stmt = $this->db->prepare(
+            'SELECT *
+             FROM clientes
+             WHERE deleted_at IS NULL
+               AND (
+                 REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefono, ""), "+", ""), " ", ""), "-", ""), "(", ""), ")", "") = :normalized
+                 OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefono_alterno, ""), "+", ""), " ", ""), "-", ""), "(", ""), ")", "") = :normalized
+               )
+             LIMIT 1'
+        );
+        $stmt->execute(['normalized' => $normalizedInput]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : $row;
+    }
+
+    public function all(array $filters = [], int $limit = 100): array
+    {
+        $sql = "SELECT * FROM {$this->table} WHERE deleted_at IS NULL";
+        $params = [];
+
+        if ($filters !== []) {
+            $clauses = [];
+            foreach ($filters as $key => $value) {
+                $clauses[] = "{$key} = :{$key}";
+                $params[$key] = $value;
+            }
+            $sql .= ' AND ' . implode(' AND ', $clauses);
+        }
+
+        $sql .= ' ORDER BY ' . $this->primaryKey . ' DESC LIMIT ' . (int) $limit;
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    public function find(int|string $id): ?array
+    {
+        $stmt = $this->db->prepare("SELECT * FROM {$this->table} WHERE {$this->primaryKey} = :id AND deleted_at IS NULL LIMIT 1");
+        $stmt->execute(['id' => $id]);
+        $data = $stmt->fetch();
+
+        return $data === false ? null : $data;
+    }
+
+    public function findByName(string $name, ?string $lastName = null): ?array
+    {
+        $normalized = trim($name);
+        if ($normalized === '') {
             return null;
         }
+
+        $fullName = $lastName !== null && trim($lastName) !== ''
+            ? $normalized . ' ' . trim($lastName)
+            : $normalized;
 
         $stmt = $this->db->prepare(
             'SELECT *
              FROM clientes
-             WHERE (
-               REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefono, ""), "+", ""), " ", ""), "-", ""), "(", ""), ")", "") = :normalized
-               OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefono_alterno, ""), "+", ""), " ", ""), "-", ""), "(", ""), ")", "") = :normalized
-             )
+             WHERE deleted_at IS NULL
+               AND (
+                 LOWER(TRIM(nombre)) = LOWER(TRIM(:name))
+                 OR LOWER(TRIM(CONCAT(nombre, " ", COALESCE(apellidos, "")))) = LOWER(TRIM(:full_name))
+               )
+             ORDER BY id DESC
              LIMIT 1'
         );
-        $stmt->execute(['normalized' => $normalizedInput]);
+        $stmt->execute([
+            'name' => $normalized,
+            'full_name' => $fullName,
+        ]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return $row === false ? null : $row;

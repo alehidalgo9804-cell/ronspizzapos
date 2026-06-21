@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Controllers\V1;
 
 use App\Core\Controller;
+use App\Core\Database;
 use App\Core\Request;
 use App\Services\OrderService;
 use Exception;
+use PDO;
 
 final class OrderController extends Controller
 {
@@ -46,6 +48,66 @@ final class OrderController extends Controller
         }
 
         $this->ok($order);
+    }
+
+    public function stream(Request $request): void
+    {
+        $branchId = (int) ($request->attributes['branch_id'] ?? 0);
+        if ($branchId <= 0) {
+            $this->fail('Branch is required', 400);
+            return;
+        }
+
+        @set_time_limit(0);
+        @ignore_user_abort(true);
+
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache, no-transform');
+        header('Connection: keep-alive');
+        header('X-Accel-Buffering: no');
+
+        while (ob_get_level() > 0) {
+            @ob_end_flush();
+        }
+        @ob_implicit_flush(true);
+
+        $pdo = Database::connection();
+        $cursor = $this->buildStreamCursor($pdo, $branchId);
+
+        $this->sendSseEvent('connected', [
+            'cursor' => $cursor,
+            'ts' => date('c'),
+        ]);
+
+        $startedAt = time();
+        $lastHeartbeatAt = time();
+        $maxConnectionSeconds = 300;
+
+        while (!connection_aborted() && (time() - $startedAt) < $maxConnectionSeconds) {
+            usleep(1000000); // 1s
+
+            $nextCursor = $this->buildStreamCursor($pdo, $branchId);
+            if ($nextCursor !== $cursor) {
+                $cursor = $nextCursor;
+                $this->sendSseEvent('orders_changed', [
+                    'cursor' => $cursor,
+                    'ts' => date('c'),
+                ]);
+                $lastHeartbeatAt = time();
+                continue;
+            }
+
+            if ((time() - $lastHeartbeatAt) >= 15) {
+                $this->sendSseEvent('heartbeat', [
+                    'ts' => date('c'),
+                ]);
+                $lastHeartbeatAt = time();
+            }
+        }
+
+        $this->sendSseEvent('disconnect', [
+            'ts' => date('c'),
+        ]);
     }
 
     public function store(Request $request): void
@@ -151,5 +213,33 @@ final class OrderController extends Controller
         } catch (Exception $exception) {
             $this->fail($exception->getMessage(), 404);
         }
+    }
+
+    private function buildStreamCursor(PDO $pdo, int $branchId): string
+    {
+        $stmt = $pdo->prepare(
+            'SELECT
+                COALESCE(MAX(updated_at), "1970-01-01 00:00:00") AS max_updated_at,
+                COALESCE(MAX(id), 0) AS max_id,
+                COUNT(*) AS total_orders
+             FROM pedidos
+             WHERE sucursal_id = :branch_id AND deleted_at IS NULL'
+        );
+        $stmt->execute(['branch_id' => $branchId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return sprintf(
+            '%s|%s|%s',
+            (string) ($row['max_updated_at'] ?? '1970-01-01 00:00:00'),
+            (string) ($row['max_id'] ?? '0'),
+            (string) ($row['total_orders'] ?? '0')
+        );
+    }
+
+    private function sendSseEvent(string $event, array $payload): void
+    {
+        echo 'event: ' . $event . "\n";
+        echo 'data: ' . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
+        @flush();
     }
 }

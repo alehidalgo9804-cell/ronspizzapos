@@ -1,11 +1,13 @@
 import 'figma_models.dart';
 
 const List<TableInfo> initialTables = [
+  // Mesas individuales
   TableInfo(id: '5', number: '5', status: TableStatus.available),
   TableInfo(id: '6', number: '6', status: TableStatus.available),
   TableInfo(id: '7', number: '7', status: TableStatus.available),
   TableInfo(id: '8', number: '8', status: TableStatus.available),
   TableInfo(id: '9', number: '9', status: TableStatus.available),
+  // Mesas combinadas
   TableInfo(id: '12', number: '1 y 2', status: TableStatus.available),
   TableInfo(id: '34', number: '3 y 4', status: TableStatus.available),
 ];
@@ -53,13 +55,6 @@ const List<CategoryData> categories = [
     name: 'Bebidas',
     image:
         'https://images.unsplash.com/photo-1551024709-8f23befc6cf7?auto=format&fit=crop&w=800&q=80',
-  ),
-  CategoryData(
-    id: 'promotions',
-    code: '09',
-    name: 'Promociones',
-    image:
-        'https://images.unsplash.com/photo-1551782450-17144efb9c50?auto=format&fit=crop&w=800&q=80',
   ),
   CategoryData(
     id: 'extras',
@@ -157,13 +152,6 @@ const List<ProductData> products = [
   ),
   ProductData(id: 'd1', name: 'Coca Cola', price: 2.49, categoryId: 'drinks'),
   ProductData(id: 'd2', name: 'Sprite', price: 2.49, categoryId: 'drinks'),
-  ProductData(
-      id: 'pr1', name: 'Combo #1', price: 19.99, categoryId: 'promotions'),
-  ProductData(
-      id: 'pr2',
-      name: 'Paquete familiar',
-      price: 39.99,
-      categoryId: 'promotions'),
   ProductData(
       id: 'me_pizza_grande',
       name: 'Pizza grande',

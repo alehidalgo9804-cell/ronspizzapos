@@ -56,28 +56,6 @@ class PosTopHeader extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Stack(
-                    children: [
-                      IconButton(
-                        onPressed: onNotificationsTap ?? () {},
-                        icon: const Icon(Icons.notifications_none, color: Color(0xFF4B5563)),
-                        tooltip: 'Notificaciones',
-                      ),
-                      if (showNotificationBadge)
-                        Positioned(
-                          right: 10,
-                          top: 10,
-                          child: Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFFEF4444),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
                   IconButton(
                     onPressed: onMenuTap ?? () {},
                     icon: const Icon(Icons.menu, color: Color(0xFF4B5563)),

@@ -1,0 +1,7 @@
+RewriteEngine On
+
+# Redirección corta para APK Android
+RewriteRule ^apk$ /ronspizzapos/downloads/RonsPizzaPOS-Android-1.0.1.apk [L,R=301]
+
+# Redirección corta para Setup Windows
+RewriteRule ^setup$ /ronspizzapos/downloads/RonsPizzaPOS-Setup-1.0.1.exe [L,R=301]

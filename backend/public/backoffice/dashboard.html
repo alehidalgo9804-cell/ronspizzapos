@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - Rons Pizza Backoffice</title>
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-brand">Rons <span>Pizza</span></div>
+      <nav class="sidebar-nav">
+        <a href="#" class="active" onclick="navigate('dashboard')">Dashboard</a>
+        <a href="#" onclick="navigate('usuarios')">Usuarios</a>
+        <a href="#" onclick="navigate('clientes')">Clientes</a>
+        <a href="#" onclick="navigate('recibos')">Recibos</a>
+        <a href="#" onclick="navigate('reportes')">Reportes</a>
+        <a href="#" onclick="navigate('sucursales')">Sucursales</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-info" id="user-info"><strong>-</strong><span>-</span></div>
+        <button class="btn btn-secondary w-100" onclick="logout()">Cerrar sesión</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <div style="display:flex;align-items:center">
+          <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+          <h2 id="page-title">Dashboard</h2>
+        </div>
+      </div>
+      <div class="content" id="content-area">
+        <!-- Dynamic content -->
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal Recibo -->
+  <div class="modal-overlay" id="modal-recibo">
+    <div class="modal" style="max-width:720px">
+      <div class="modal-header">
+        <h3>Detalle del Recibo</h3>
+        <button class="modal-close" onclick="hideModal('modal-recibo')">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-recibo-body"></div>
+    </div>
+  </div>
+
+  <!-- Modal Cliente -->
+  <div class="modal-overlay" id="modal-cliente">
+    <div class="modal" style="max-width:640px">
+      <div class="modal-header">
+        <h3 id="modal-cliente-title">Cliente</h3>
+        <button class="modal-close" onclick="hideModal('modal-cliente')">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-cliente-body"></div>
+      <div class="modal-footer" id="modal-cliente-footer"></div>
+    </div>
+  </div>
+
+  <!-- Modal Usuario -->
+  <div class="modal-overlay" id="modal-usuario">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-title">Nuevo Usuario</h3>
+        <button class="modal-close" onclick="hideModal('modal-usuario')">&times;</button>
+      </div>
+      <form id="form-usuario" onsubmit="event.preventDefault(); guardarUsuario();">
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Usuario *</label>
+            <input type="text" id="inp-usuario" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label>Nombre *</label>
+            <input type="text" id="inp-nombre" class="form-control" required>
+          </div>
+          <div class="form-group">
+            <label>Apellido</label>
+            <input type="text" id="inp-apellido" class="form-control">
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" id="inp-email" class="form-control">
+          </div>
+          <div class="form-group">
+            <label>Contraseña <span id="password-help" class="text-muted" style="font-weight:400;font-size:12px;"></span></label>
+            <input type="password" id="inp-password" class="form-control">
+          </div>
+          <div class="form-group">
+            <label>Rol *</label>
+            <select id="inp-rol" class="form-control" required>
+              <option value="">Seleccionar...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Sucursal *</label>
+            <select id="inp-sucursal" class="form-control" required>
+              <option value="">Seleccionar...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Estado</label>
+            <select id="inp-activo" class="form-control">
+              <option value="1">Activo</option>
+              <option value="0">Inactivo</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="hideModal('modal-usuario')">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btn-guardar">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/main.js"></script>
+  <script src="js/usuarios.js"></script>
+  <script src="js/clientes.js"></script>
+  <script src="js/recibos.js"></script>
+  <script src="js/reportes.js"></script>
+  <script>
+    if (!requireAuth()) {} // redirected already
+
+    let currentView = 'dashboard';
+
+    function navigate(view) {
+      currentView = view;
+      document.querySelectorAll('.sidebar-nav a').forEach(a => a.classList.remove('active'));
+      const activeLink = Array.from(document.querySelectorAll('.sidebar-nav a')).find(a => a.textContent.toLowerCase().includes(view === 'dashboard' ? 'dash' : view === 'usuarios' ? 'usu' : 'suc'));
+      if (activeLink) activeLink.classList.add('active');
+
+      const content = document.getElementById('content-area');
+      const title = document.getElementById('page-title');
+
+      if (view === 'dashboard') {
+        title.textContent = 'Dashboard';
+        content.innerHTML = `
+          <div class="card">
+            <div class="card-header"><h3>Bienvenido al Backoffice</h3></div>
+            <p class="text-muted">Selecciona una opcion del menu lateral para comenzar.</p>
+          </div>`;
+      } else if (view === 'usuarios') {
+        title.textContent = 'Usuarios del Sistema';
+        content.innerHTML = `
+          <div class="card has-mobile-cards">
+            <div class="card-header">
+              <h3>Usuarios</h3>
+              <button class="btn btn-primary" onclick="abrirModalCrear()">+ Nuevo Usuario</button>
+            </div>
+            <div class="filters">
+              <select id="filtro-sucursal" class="form-control" onchange="loadUsuarios()"><option value="">Todas las sucursales</option></select>
+              <select id="filtro-rol" class="form-control" onchange="loadUsuarios()"><option value="">Todos los roles</option></select>
+              <input type="text" id="filtro-busqueda" class="form-control" placeholder="Buscar usuario o nombre..." oninput="loadUsuarios()">
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>ID</th><th>Sucursal</th><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th style="text-align:right">Acciones</th></tr>
+                </thead>
+                <tbody id="usuarios-body"></tbody>
+              </table>
+            </div>
+            <div class="mobile-card-list" id="usuarios-mobile-list"></div>
+          </div>`;
+        initUsuarios();
+      } else if (view === 'clientes') {
+        title.textContent = 'Clientes';
+        content.innerHTML = `
+          <div class="card has-mobile-cards">
+            <div class="card-header">
+              <h3>Clientes</h3>
+              <button class="btn btn-primary" onclick="abrirModalCrearCliente()">+ Nuevo Cliente</button>
+            </div>
+            <div class="filters">
+              <input type="text" id="busqueda-cliente" class="form-control" placeholder="Buscar por nombre o telefono..." oninput="clientePage=1;loadClientes()" style="flex:1;min-width:260px">
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>ID</th><th>Nombre</th><th>Telefono</th><th>Tel. alterno</th><th>Email</th><th>Direcciones</th><th style="text-align:right">Acciones</th></tr>
+                </thead>
+                <tbody id="clientes-body"></tbody>
+              </table>
+            </div>
+            <div class="mobile-card-list" id="clientes-mobile-list"></div>
+            <div id="clientes-paginacion" style="margin-top:16px"></div>
+          </div>`;
+        initClientes();
+      } else if (view === 'recibos') {
+        title.textContent = 'Recibos';
+        content.innerHTML = `
+          <div class="card mb-4">
+            <div class="card-header"><h3>Filtros</h3></div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+              <div class="form-group" style="margin:0">
+                <label>Fecha inicio</label>
+                <input type="date" id="recibo-fecha-inicio" class="form-control">
+              </div>
+              <div class="form-group" style="margin:0">
+                <label>Fecha fin</label>
+                <input type="date" id="recibo-fecha-fin" class="form-control">
+              </div>
+              <div class="form-group" style="margin:0">
+                <label>Sucursal</label>
+                <select id="recibo-sucursal" class="form-control"><option value="">Todas</option></select>
+              </div>
+              <div class="form-group" style="margin:0">
+                <label>Mesero</label>
+                <select id="recibo-mesero" class="form-control"><option value="">Todos</option></select>
+              </div>
+              <div class="form-group" style="margin:0">
+                <label>Estatus</label>
+                <select id="recibo-estado" class="form-control">
+                  <option value="">Todos</option>
+                  <option value="completado">Completado</option>
+                  <option value="cancelado">Cancelado</option>
+                  <option value="abierto">Abierto</option>
+                  <option value="pendiente">Pendiente</option>
+                  <option value="en_preparacion">En preparacion</option>
+                  <option value="listo">Listo</option>
+                </select>
+              </div>
+              <input type="text" id="recibo-busqueda" class="form-control" placeholder="Buscar folio..." oninput="reciboPage=1;loadRecibos()" style="min-width:180px">
+              <button class="btn btn-primary" id="btn-cargar-recibos" onclick="reciboPage=1;loadRecibos()">Buscar</button>
+            </div>
+          </div>
+          <div class="card has-mobile-cards">
+            <div class="table-wrap" id="recibos-table-wrap">
+              <table>
+                <thead>
+                  <tr><th># Ticket</th><th>Mesero</th><th>Fecha</th><th style="text-align:right">Cantidad</th><th style="text-align:right">Descuento</th><th>Estatus</th><th style="text-align:right">Detalles</th></tr>
+                </thead>
+                <tbody id="recibos-body"></tbody>
+              </table>
+            </div>
+            <div class="mobile-card-list" id="recibos-mobile-list"></div>
+            <div id="recibos-paginacion"></div>
+          </div>`;
+        initRecibos();
+      } else if (view === 'reportes') {
+        title.textContent = 'Reportes de Modificadores';
+        content.innerHTML = `
+          <div class="card mb-4">
+            <div class="card-header"><h3>Filtros</h3></div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+              <div class="form-group" style="margin:0">
+                <label>Fecha inicio</label>
+                <input type="date" id="fecha-inicio" class="form-control">
+              </div>
+              <div class="form-group" style="margin:0">
+                <label>Fecha fin</label>
+                <input type="date" id="fecha-fin" class="form-control">
+              </div>
+              <div class="form-group" style="margin:0">
+                <label>Sucursal</label>
+                <select id="reporte-sucursal" class="form-control"><option value="">Todas</option></select>
+              </div>
+              <button class="btn btn-primary" id="btn-cargar-reporte" onclick="cargarReporte()">Generar reporte</button>
+            </div>
+          </div>
+          <div id="reporte-resultados"></div>`;
+        initReportes();
+      } else if (view === 'sucursales') {
+        title.textContent = 'Sucursales';
+        content.innerHTML = `
+          <div class="card">
+            <div class="card-header"><h3>Sucursales</h3></div>
+            <p class="text-muted">Gestion de sucursales - proximamente.</p>
+          </div>`;
+      }
+    }
+
+    function toggleSidebar() {
+      document.querySelector('.sidebar').classList.toggle('open');
+    }
+    document.addEventListener('click', function(e) {
+      const sidebar = document.querySelector('.sidebar');
+      const toggle = document.querySelector('.menu-toggle');
+      if (sidebar && sidebar.classList.contains('open') &&
+          !sidebar.contains(e.target) && e.target !== toggle && !toggle.contains(e.target)) {
+        sidebar.classList.remove('open');
+      }
+    });
+
+    (async function boot() {
+      const ok = await checkSession();
+      if (ok) navigate('dashboard');
+    })();
+  </script>
+</body>
+</html>

@@ -63,8 +63,27 @@ bool GetDefaultPrinterName(std::wstring* printer_name) {
   return !printer_name->empty();
 }
 
+bool PrintRawBytes(const std::wstring& printer_name,
+                   const std::vector<uint8_t>& bytes,
+                   std::string* error_message);
+
 bool PrintRawText(const std::wstring& printer_name, const std::string& text,
                   std::string* error_message) {
+  std::vector<uint8_t> bytes(text.begin(), text.end());
+  bytes.push_back('\r');
+  bytes.push_back('\n');
+  bytes.push_back('\r');
+  bytes.push_back('\n');
+  // ESC/POS partial cut command (GS V 1).
+  bytes.push_back(0x1D);
+  bytes.push_back(0x56);
+  bytes.push_back(0x01);
+  return PrintRawBytes(printer_name, bytes, error_message);
+}
+
+bool PrintRawBytes(const std::wstring& printer_name,
+                   const std::vector<uint8_t>& bytes,
+                   std::string* error_message) {
   HANDLE printer_handle = nullptr;
   if (!OpenPrinterW(const_cast<LPWSTR>(printer_name.c_str()), &printer_handle,
                     nullptr)) {
@@ -96,50 +115,18 @@ bool PrintRawText(const std::wstring& printer_name, const std::string& text,
     return false;
   }
 
-  const std::string printable = text + "\r\n\r\n";
-  DWORD text_written = 0;
-  const BOOL text_write_ok =
-      WritePrinter(printer_handle, (LPVOID)printable.data(),
-                   static_cast<DWORD>(printable.size()), &text_written);
-  EndPagePrinter(printer_handle);
-
-  if (!StartPagePrinter(printer_handle)) {
-    if (error_message != nullptr) {
-      *error_message = "Unable to start cut command page.";
-    }
-    EndDocPrinter(printer_handle);
-    ClosePrinter(printer_handle);
-    return false;
-  }
-
-  // ESC/POS cut commands.
-  // Prefer partial cut (GS V 1). If it can't be written, fallback to full cut (GS V 0).
-  const BYTE partial_cut_cmd[] = {0x1D, 0x56, 0x01};
-  const BYTE full_cut_cmd[] = {0x1D, 0x56, 0x00};
-  DWORD cut_written = 0;
-  BOOL cut_write_ok =
-      WritePrinter(printer_handle, (LPVOID)partial_cut_cmd,
-                   static_cast<DWORD>(sizeof(partial_cut_cmd)), &cut_written);
-  if (!cut_write_ok || cut_written == 0) {
-    cut_written = 0;
-    cut_write_ok =
-        WritePrinter(printer_handle, (LPVOID)full_cut_cmd,
-                     static_cast<DWORD>(sizeof(full_cut_cmd)), &cut_written);
-  }
+  DWORD written = 0;
+  const BOOL write_ok =
+      WritePrinter(printer_handle, (LPVOID)bytes.data(),
+                   static_cast<DWORD>(bytes.size()), &written);
 
   EndPagePrinter(printer_handle);
   EndDocPrinter(printer_handle);
   ClosePrinter(printer_handle);
 
-  if (!text_write_ok || text_written == 0) {
+  if (!write_ok || written == 0) {
     if (error_message != nullptr) {
-      *error_message = "Unable to write ticket data to printer.";
-    }
-    return false;
-  }
-  if (!cut_write_ok || cut_written == 0) {
-    if (error_message != nullptr) {
-      *error_message = "Ticket printed, but cut command failed.";
+      *error_message = "Unable to write ticket bytes to printer.";
     }
     return false;
   }
@@ -180,29 +167,12 @@ bool FlutterWindow::OnCreate() {
          std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
              result) {
         const std::string method = call.method_name();
-        if (method != "printKitchenTicket" &&
-            method != "printCustomerReceipt") {
+        const bool is_text = (method == "printKitchenTicket" ||
+                              method == "printCustomerReceipt");
+        const bool is_bytes = (method == "printKitchenTicketBytes" ||
+                               method == "printCustomerReceiptBytes");
+        if (!is_text && !is_bytes) {
           result->NotImplemented();
-          return;
-        }
-
-        const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
-        if (args == nullptr) {
-          result->Error("INVALID_ARGUMENTS",
-                        "Expected map arguments with ticket text.");
-          return;
-        }
-
-        const auto text_it = args->find(flutter::EncodableValue("text"));
-        if (text_it == args->end()) {
-          result->Error("INVALID_ARGUMENTS", "Missing 'text' argument.");
-          return;
-        }
-
-        const auto* text =
-            std::get_if<std::string>(&text_it->second);
-        if (text == nullptr || text->empty()) {
-          result->Error("INVALID_ARGUMENTS", "Ticket text is empty.");
           return;
         }
 
@@ -214,14 +184,66 @@ bool FlutterWindow::OnCreate() {
         }
 
         std::string error_message;
-        const std::wstring text_wide = Utf8ToWide(*text);
-        const std::string printable_text = WideToAnsi(text_wide);
-        if (!PrintRawText(printer_name, printable_text, &error_message)) {
-          const std::string printer_utf8 = WideToUtf8(printer_name);
-          result->Error("PRINT_FAILED",
-                        "Failed printing on '" + printer_utf8 +
-                            "': " + error_message);
-          return;
+
+        if (is_text) {
+          const auto* args =
+              std::get_if<flutter::EncodableMap>(call.arguments());
+          if (args == nullptr) {
+            result->Error("INVALID_ARGUMENTS",
+                          "Expected map arguments with ticket text.");
+            return;
+          }
+
+          const auto text_it = args->find(flutter::EncodableValue("text"));
+          if (text_it == args->end()) {
+            result->Error("INVALID_ARGUMENTS", "Missing 'text' argument.");
+            return;
+          }
+
+          const auto* text = std::get_if<std::string>(&text_it->second);
+          if (text == nullptr || text->empty()) {
+            result->Error("INVALID_ARGUMENTS", "Ticket text is empty.");
+            return;
+          }
+
+          const std::wstring text_wide = Utf8ToWide(*text);
+          const std::string printable_text = WideToAnsi(text_wide);
+          if (!PrintRawText(printer_name, printable_text, &error_message)) {
+            const std::string printer_utf8 = WideToUtf8(printer_name);
+            result->Error("PRINT_FAILED",
+                          "Failed printing on '" + printer_utf8 +
+                              "': " + error_message);
+            return;
+          }
+        } else {
+          const auto* args =
+              std::get_if<flutter::EncodableMap>(call.arguments());
+          if (args == nullptr) {
+            result->Error("INVALID_ARGUMENTS",
+                          "Expected map arguments with ticket bytes.");
+            return;
+          }
+
+          const auto bytes_it = args->find(flutter::EncodableValue("bytes"));
+          if (bytes_it == args->end()) {
+            result->Error("INVALID_ARGUMENTS", "Missing 'bytes' argument.");
+            return;
+          }
+
+          const auto* bytes =
+              std::get_if<std::vector<uint8_t>>(&bytes_it->second);
+          if (bytes == nullptr || bytes->empty()) {
+            result->Error("INVALID_ARGUMENTS", "Ticket bytes are empty.");
+            return;
+          }
+
+          if (!PrintRawBytes(printer_name, *bytes, &error_message)) {
+            const std::string printer_utf8 = WideToUtf8(printer_name);
+            result->Error("PRINT_FAILED",
+                          "Failed printing on '" + printer_utf8 +
+                              "': " + error_message);
+            return;
+          }
         }
 
         result->Success(flutter::EncodableValue(true));

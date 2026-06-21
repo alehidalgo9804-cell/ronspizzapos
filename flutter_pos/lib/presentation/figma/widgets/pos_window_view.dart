@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../../../core/session/app_session.dart';
-import '../../../core/platform/kitchen_printer.dart';
+
+import '../../../core/platform/esc_pos_builder.dart';
+import '../../../core/platform/printer_manager.dart';
+import '../../../core/platform/printer_models.dart';
 import '../constants/labels.dart';
 import '../figma_mock_data.dart';
 import '../figma_models.dart';
@@ -16,7 +20,10 @@ import 'hamburger_builder_view.dart';
 import 'panes_ajo_builder_view.dart';
 import 'pizza_builder_view.dart';
 import 'pos_functions_drawer.dart';
+import 'pos_printer_preview_dialog.dart';
+import 'pos_printer_settings_dialog.dart';
 import 'pos_sales_report_dialog.dart';
+
 import 'pos_top_header.dart';
 import 'spaghetti_builder_view.dart';
 import 'wings_builder_view.dart';
@@ -30,6 +37,8 @@ class PosWindowView extends StatefulWidget {
     required this.onProceedToPayment,
     required this.onSaveCustomer,
     this.onLogout,
+    this.onCustomers,
+    this.onUsers,
   });
 
   final AppOrder order;
@@ -38,6 +47,8 @@ class PosWindowView extends StatefulWidget {
   final ValueChanged<AppOrder> onProceedToPayment;
   final Future<Map<String, int>> Function(AppOrder order) onSaveCustomer;
   final VoidCallback? onLogout;
+  final VoidCallback? onCustomers;
+  final VoidCallback? onUsers;
 
   @override
   State<PosWindowView> createState() => _PosWindowViewState();
@@ -75,6 +86,10 @@ class _PosWindowViewState extends State<PosWindowView> {
       TextEditingController();
   final TextEditingController _deliveryShippingController =
       TextEditingController();
+  final TextEditingController _deliveryAddressController =
+      TextEditingController();
+  List<String> _deliveryAddressSuggestions = const [];
+  Timer? _deliveryAddressDebounce;
 
   static const List<_DrinkCategoryEntry> _drinkCatalog = [
     _DrinkCategoryEntry.group(
@@ -173,8 +188,12 @@ class _PosWindowViewState extends State<PosWindowView> {
     'BBQ',
   ];
 
-  bool get _isTableOrder => widget.order.tableNumber != null;
+  bool get _isTableOrder =>
+      widget.order.tableNumber != null ||
+      widget.order.orderType == _dineInType;
   bool get _isDelivery => _orderType == _deliveryType;
+  bool get _hasUnsentItems =>
+      _orderItems.any((item) => !item.sentToKitchen && _resolveItemArea(item) != 'GENERAL');
   bool get _isDrinksCategory => _selectedCategory == 'drinks';
   _DeliveryAddressOption? get _selectedDeliveryAddressOption {
     final label = _selectedDeliveryAddress?.trim() ?? '';
@@ -263,11 +282,13 @@ class _PosWindowViewState extends State<PosWindowView> {
   @override
   void dispose() {
     _customerSearchDebounce?.cancel();
+    _deliveryAddressDebounce?.cancel();
     _customerSearchController.dispose();
     _customerNameController.dispose();
     _phoneController.dispose();
     _deliveryNotesController.dispose();
     _deliveryShippingController.dispose();
+    _deliveryAddressController.dispose();
     super.dispose();
   }
 
@@ -290,9 +311,9 @@ class _PosWindowViewState extends State<PosWindowView> {
     if (!_guests.any((guest) => guest.id == _currentGuest)) {
       _currentGuest = _guests.first.id;
     }
-    _orderType = _isTableOrder
-        ? _dineInType
-        : (order.orderType == _deliveryType ? _deliveryType : _toGoType);
+    _orderType = order.orderType == _deliveryType
+        ? _deliveryType
+        : (order.orderType == _dineInType ? _dineInType : _toGoType);
     _deliveryAddresses = List<String>.from(order.deliveryAddresses);
     _deliveryAddressIdsByLabel.clear();
     _deliveryAddressOptionsByLabel.clear();
@@ -330,6 +351,7 @@ class _PosWindowViewState extends State<PosWindowView> {
     }
     _customerNameController.text = order.customerName ?? '';
     _phoneController.text = order.customerPhone ?? '';
+    _deliveryAddressController.text = order.deliveryAddress ?? '';
     _deliveryNotesController.text = order.deliveryNotes ?? '';
     final ship = order.deliveryShippingCost;
     _deliveryShippingController.text = ship > 0 ? ship.toStringAsFixed(2) : '';
@@ -358,8 +380,8 @@ class _PosWindowViewState extends State<PosWindowView> {
           : _phoneController.text.trim(),
       customerId: _selectedCustomerId,
       customerAddressId: _selectedCustomerAddressId,
-      deliveryAddress: _isDelivery ? _selectedDeliveryAddress : null,
-      deliveryAddressReference: null,
+      deliveryAddress: _isDelivery ? selectedAddress?.address : null,
+      deliveryAddressReference: _isDelivery ? selectedAddress?.reference : null,
       deliveryAddressDetails: _isDelivery ? selectedAddress?.details : null,
       deliveryAddressPlaceId: _isDelivery ? selectedAddress?.placeId : null,
       deliveryAddressLatitude: _isDelivery ? selectedAddress?.latitude : null,
@@ -394,6 +416,19 @@ class _PosWindowViewState extends State<PosWindowView> {
         GuestData(id: newGuestId, name: 'Cliente $newGuestId')
       ];
       _currentGuest = newGuestId;
+    });
+    _emitOrderChanged();
+  }
+
+  void _removeGuest(int guestId) {
+    setState(() {
+      _guests = _guests.where((g) => g.id != guestId).toList(growable: false);
+      _orderItems = _orderItems
+          .where((item) => item.guestId != guestId)
+          .toList(growable: false);
+      if (_currentGuest == guestId) {
+        _currentGuest = _guests.isNotEmpty ? _guests.first.id : 1;
+      }
     });
     _emitOrderChanged();
   }
@@ -808,21 +843,26 @@ class _PosWindowViewState extends State<PosWindowView> {
   }
 
   Future<void> _openPizzaBuilder() async {
+    final existingPizzaCount = _orderItems.fold<int>(
+      0,
+      (sum, item) => sum + ((item.pizzaConfig != null) ? item.quantity : 0),
+    );
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (context) {
         final screenSize = MediaQuery.of(context).size;
-        final dialogWidth = (screenSize.width * 0.88).clamp(1320.0, 1700.0);
-        final dialogHeight = (screenSize.height * 0.9).clamp(760.0, 980.0);
+        final dialogWidth = (screenSize.width * 0.88).clamp(720.0, 1700.0);
+        final dialogHeight = (screenSize.height * 0.9).clamp(600.0, 980.0);
         return Dialog(
           alignment: Alignment.centerRight,
-          insetPadding: const EdgeInsets.fromLTRB(220, 16, 24, 16),
+          insetPadding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width > 1200 ? 220 : 16, 16, 24, 16),
           child: SizedBox(
             width: dialogWidth,
             height: dialogHeight,
             child: PizzaBuilderView(
               onBack: () => Navigator.of(context).pop(),
+              existingPizzaCount: existingPizzaCount,
               onAddPizza: (config, price) {
                 final itemId = 'pizza_${DateTime.now().microsecondsSinceEpoch}';
                 final specialtyName =
@@ -865,6 +905,7 @@ class _PosWindowViewState extends State<PosWindowView> {
                         crustHalf1: config.crustHalf1,
                         crustHalf2: config.crustHalf2,
                         includePromoGarlicBread: config.includePromoGarlicBread,
+                        promoPizzaMediana: config.promoPizzaMediana,
                       ),
                     ),
                   ];
@@ -885,11 +926,11 @@ class _PosWindowViewState extends State<PosWindowView> {
       barrierDismissible: false,
       builder: (context) {
         final screenSize = MediaQuery.of(context).size;
-        final dialogWidth = (screenSize.width * 0.88).clamp(1320.0, 1700.0);
-        final dialogHeight = (screenSize.height * 0.9).clamp(760.0, 980.0);
+        final dialogWidth = (screenSize.width * 0.88).clamp(720.0, 1700.0);
+        final dialogHeight = (screenSize.height * 0.9).clamp(600.0, 980.0);
         return Dialog(
           alignment: Alignment.centerRight,
-          insetPadding: const EdgeInsets.fromLTRB(220, 16, 24, 16),
+          insetPadding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width > 1200 ? 220 : 16, 16, 24, 16),
           child: SizedBox(
             width: dialogWidth,
             height: dialogHeight,
@@ -957,11 +998,11 @@ class _PosWindowViewState extends State<PosWindowView> {
       barrierDismissible: false,
       builder: (context) {
         final screenSize = MediaQuery.of(context).size;
-        final dialogWidth = (screenSize.width * 0.88).clamp(1320.0, 1700.0);
-        final dialogHeight = (screenSize.height * 0.9).clamp(760.0, 980.0);
+        final dialogWidth = (screenSize.width * 0.88).clamp(720.0, 1700.0);
+        final dialogHeight = (screenSize.height * 0.9).clamp(600.0, 980.0);
         return Dialog(
           alignment: Alignment.centerRight,
-          insetPadding: const EdgeInsets.fromLTRB(220, 16, 24, 16),
+          insetPadding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width > 1200 ? 220 : 16, 16, 24, 16),
           child: SizedBox(
             width: dialogWidth,
             height: dialogHeight,
@@ -1004,11 +1045,11 @@ class _PosWindowViewState extends State<PosWindowView> {
       barrierDismissible: false,
       builder: (context) {
         final screenSize = MediaQuery.of(context).size;
-        final dialogWidth = (screenSize.width * 0.88).clamp(1320.0, 1700.0);
-        final dialogHeight = (screenSize.height * 0.9).clamp(760.0, 980.0);
+        final dialogWidth = (screenSize.width * 0.88).clamp(720.0, 1700.0);
+        final dialogHeight = (screenSize.height * 0.9).clamp(600.0, 980.0);
         return Dialog(
           alignment: Alignment.centerRight,
-          insetPadding: const EdgeInsets.fromLTRB(220, 16, 24, 16),
+          insetPadding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width > 1200 ? 220 : 16, 16, 24, 16),
           child: SizedBox(
             width: dialogWidth,
             height: dialogHeight,
@@ -1046,11 +1087,11 @@ class _PosWindowViewState extends State<PosWindowView> {
       barrierDismissible: false,
       builder: (context) {
         final screenSize = MediaQuery.of(context).size;
-        final dialogWidth = (screenSize.width * 0.88).clamp(1320.0, 1700.0);
-        final dialogHeight = (screenSize.height * 0.9).clamp(760.0, 980.0);
+        final dialogWidth = (screenSize.width * 0.88).clamp(720.0, 1700.0);
+        final dialogHeight = (screenSize.height * 0.9).clamp(600.0, 980.0);
         return Dialog(
           alignment: Alignment.centerRight,
-          insetPadding: const EdgeInsets.fromLTRB(220, 16, 24, 16),
+          insetPadding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width > 1200 ? 220 : 16, 16, 24, 16),
           child: SizedBox(
             width: dialogWidth,
             height: dialogHeight,
@@ -1089,11 +1130,11 @@ class _PosWindowViewState extends State<PosWindowView> {
       barrierDismissible: false,
       builder: (context) {
         final screenSize = MediaQuery.of(context).size;
-        final dialogWidth = (screenSize.width * 0.88).clamp(1320.0, 1700.0);
-        final dialogHeight = (screenSize.height * 0.9).clamp(760.0, 980.0);
+        final dialogWidth = (screenSize.width * 0.88).clamp(720.0, 1700.0);
+        final dialogHeight = (screenSize.height * 0.9).clamp(600.0, 980.0);
         return Dialog(
           alignment: Alignment.centerRight,
-          insetPadding: const EdgeInsets.fromLTRB(220, 16, 24, 16),
+          insetPadding: EdgeInsets.fromLTRB(MediaQuery.of(context).size.width > 1200 ? 220 : 16, 16, 24, 16),
           child: SizedBox(
             width: dialogWidth,
             height: dialogHeight,
@@ -1307,6 +1348,9 @@ class _PosWindowViewState extends State<PosWindowView> {
     if (config.extraIngredients.isNotEmpty) {
       lines.add('Extras: ${config.extraIngredients.join(', ')}');
     }
+    if (config.promoPizzaMediana) {
+      lines.add('Promo pizza mediana');
+    }
     if (config.includePromoGarlicBread) {
       lines.add('Panes de ajo promo');
     }
@@ -1456,12 +1500,151 @@ class _PosWindowViewState extends State<PosWindowView> {
     return lines;
   }
 
+  String _resolveItemArea(OrderItemData item) {
+    final nameUpper = item.name.toUpperCase();
+    switch (item.categoryId) {
+      case 'pizzas':
+      case 'spaghetti':
+        return 'HORNO';
+      case 'wings':
+      case 'boneless':
+      case 'hamburgers':
+        return 'FREIDORAS Y PLANCHA';
+      case 'complements':
+        if (item.garlicBreadConfig != null ||
+            nameUpper.contains('PANES DE AJO')) {
+          return 'HORNO';
+        }
+        if (nameUpper.contains('PAPAS') ||
+            nameUpper.contains('QUESITOS') ||
+            nameUpper.contains('AROS') ||
+            nameUpper.contains('ENSALADA')) {
+          return 'FREIDORAS Y PLANCHA';
+        }
+        return 'GENERAL';
+      case 'menu_estadio':
+        if (nameUpper.contains('PIZZA') ||
+            nameUpper.contains('PANES DE AJO')) {
+          return 'HORNO';
+        }
+        return 'FREIDORAS Y PLANCHA';
+      default:
+        return 'GENERAL';
+    }
+  }
+
   Future<void> _sendToKitchen() async {
     if (_orderItems.isEmpty) return;
     _emitOrderChanged();
-    final ticketText = _buildKitchenTicketText();
+
+    var itemsToPrint = _orderItems
+        .where((i) => !i.sentToKitchen && _resolveItemArea(i) != 'GENERAL')
+        .toList();
+
+    // Si todo ya fue enviado, preguntar si quiere reimprimir
+    if (itemsToPrint.isEmpty) {
+      final shouldReprint = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Reimprimir comanda'),
+          content: const Text(
+              'Todos los productos ya fueron enviados a cocina. ¿Deseas reimprimir la comanda completa?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Reimprimir'),
+            ),
+          ],
+        ),
+      );
+      if (shouldReprint != true) return;
+      itemsToPrint = _orderItems.toList();
+    }
+
+    final groups = <String, List<OrderItemData>>{};
+    for (final item in itemsToPrint) {
+      final a = _resolveItemArea(item);
+      groups.putIfAbsent(a, () => []).add(item);
+    }
+
+    final areasToPrint = ['HORNO', 'FREIDORAS Y PLANCHA']
+        .where((a) => groups.containsKey(a) && groups[a]!.isNotEmpty)
+        .toList();
+
+    if (areasToPrint.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('No hay items para imprimir en cocina.')),
+        );
+      }
+      return;
+    }
+
+    final ticketTexts = <String>[];
+    for (final area in areasToPrint) {
+      ticketTexts.add(
+        _buildKitchenTicketText(items: groups[area]!, area: area),
+      );
+    }
+
+    final deliveryTicket = _isDelivery ? _buildDeliveryTicketText() : null;
+
     try {
-      await KitchenPrinter.printKitchenTicket(ticketText);
+      final printer =
+          PrinterManager.instance.resolvePrinter(PrinterDestination.kitchenTicket);
+      if (printer != null && printer.driver == PrinterDriver.pdf) {
+        if (!mounted) return;
+        final allTexts = [...ticketTexts];
+        if (deliveryTicket != null) allTexts.add(deliveryTicket);
+        if (allTexts.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text('No hay items para imprimir en cocina.')),
+            );
+          }
+          return;
+        }
+        await showPrinterPreviewDialog(
+          context,
+          title: 'Ticket cocina',
+          ticketText: allTexts.join('\n\n'),
+        );
+        // Marcar items como enviados solo si NO era una reimpresión
+        if (itemsToPrint.any((i) => !i.sentToKitchen)) {
+          _markItemsAsSent(itemsToPrint);
+        }
+        return;
+      }
+
+      for (final area in areasToPrint) {
+        final bytes = _buildKitchenTicketEscPos(
+          items: groups[area]!,
+          area: area,
+        );
+        await PrinterManager.instance.printEscPosTicket(
+          destination: PrinterDestination.kitchenTicket,
+          bytes: bytes,
+        );
+      }
+
+      if (deliveryTicket != null) {
+        await PrinterManager.instance.printTicket(
+          destination: PrinterDestination.customerReceipt,
+          text: deliveryTicket,
+        );
+      }
+
+      // Marcar items como enviados solo si NO era una reimpresión
+      if (itemsToPrint.any((i) => !i.sentToKitchen)) {
+        _markItemsAsSent(itemsToPrint);
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(PosLabels.ticket.kitchenTicketSent)),
@@ -1475,25 +1658,53 @@ class _PosWindowViewState extends State<PosWindowView> {
     }
   }
 
-  String _buildKitchenTicketText() {
-    const lineWidth = 42;
+  void _markItemsAsSent(List<OrderItemData> sentItems) {
+    final sentIds = sentItems.map((i) => i.id).toSet();
+    setState(() {
+      _orderItems = _orderItems.map((item) {
+        if (sentIds.contains(item.id) && !item.sentToKitchen) {
+          return item.copyWith(sentToKitchen: true);
+        }
+        return item;
+      }).toList();
+    });
+    _emitOrderChanged();
+  }
+
+  String _buildKitchenTicketText({
+    List<OrderItemData>? items,
+    String? area,
+  }) {
+    final lineWidth = PrinterManager.instance.charsPerLine(PrinterDestination.kitchenTicket);
     const qtyWidth = 4;
+    final ticketItems = items ?? _orderItems;
+    final ticketArea = area ?? _resolveItemArea(ticketItems.first);
 
     String spaces(int count) => count <= 0 ? '' : ' ' * count;
     String divider() => '-' * lineWidth;
     String normalize(String value) =>
         value.replaceAll(RegExp(r'\s+'), ' ').trim();
     String twoDigits(int value) => value.toString().padLeft(2, '0');
-    String formatDateTime(DateTime value) {
+
+    const monthsEs = [
+      'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+    ];
+    String formatDateTimeEs(DateTime value) {
       final local = value.toLocal();
-      return '${twoDigits(local.day)}/${twoDigits(local.month)}/${local.year} '
+      return '${twoDigits(local.day)} ${monthsEs[local.month - 1]} ${local.year} '
           '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
     }
 
-    String center(String text) {
-      if (text.length >= lineWidth) return text;
-      final left = ((lineWidth - text.length) / 2).floor();
-      return '${spaces(left)}$text';
+    String labelValue(String label, String value) {
+      final l = label.trim();
+      final v = value.trim();
+      if (v.isEmpty) return l;
+      final total = l.length + 1 + v.length;
+      if (total <= lineWidth) {
+        return '$l${spaces(lineWidth - total)} $v';
+      }
+      return '$l\n${v.padLeft(lineWidth)}';
     }
 
     String rowQty(String text, int qty) {
@@ -1504,46 +1715,28 @@ class _PosWindowViewState extends State<PosWindowView> {
       return '${display.padRight(maxNameWidth)} ${qty.toString().padLeft(qtyWidth)}';
     }
 
-    String resolveArea() {
-      for (final item in _orderItems) {
-        switch (item.categoryId) {
-          case '01':
-          case '1':
-          case 'Pizzas':
-          case 'pizzas':
-            return 'HORNO';
-          case '03':
-          case '04':
-          case '3':
-          case '4':
-          case 'Alitas':
-          case 'Boneless':
-          case 'alitas':
-          case 'boneless':
-            return 'FREIDORAS Y PLANCHA';
-          default:
-            continue;
-        }
-      }
-      return 'GENERAL';
+    String resolveComment() {
+      final notes = (widget.order.deliveryNotes ?? '').trim();
+      if (notes.isNotEmpty) return notes;
+      final name = (widget.order.customerName ?? '').trim();
+      final phone = (widget.order.customerPhone ?? '').trim();
+      if (name.isNotEmpty && phone.isNotEmpty) return '$name $phone';
+      return name.isNotEmpty ? name : phone;
     }
 
     final buffer = StringBuffer();
     final now = DateTime.now();
-    buffer.writeln(center('COMANDA COCINA'));
+
+    buffer.writeln(labelValue('Mesero', _session.userName ?? 'Sin cajero'));
+    buffer.writeln(labelValue('Enviado', formatDateTimeEs(now)));
+    buffer.writeln(labelValue('Área de producción', ticketArea));
+    buffer.writeln(labelValue('Mesa №', widget.order.tableNumber ?? ''));
+    buffer.writeln(labelValue('Recibo №',
+        widget.order.ticketNumber.replaceAll('#', '').replaceAll(' ', '')));
+    buffer.writeln(labelValue('Comentario al ticket', resolveComment()));
     buffer.writeln(divider());
-    buffer.writeln('Cajero: ${_session.userName ?? 'Sin cajero'}');
-    buffer.writeln('Hora: ${formatDateTime(now)}');
-    buffer.writeln('Area: ${resolveArea()}');
-    buffer.writeln('${PosLabels.common.ticket}: ${widget.order.ticketNumber}');
-    buffer.writeln(widget.order.tableNumber != null
-        ? '${PosLabels.common.table} ${widget.order.tableNumber}'
-        : _displayOrderType(_orderType));
-    buffer.writeln(divider());
-    buffer.writeln(
-        '${'Nombre'.padRight(lineWidth - qtyWidth - 1)} ${'Cant'.padLeft(qtyWidth)}');
-    buffer.writeln(divider());
-    for (final item in _orderItems) {
+    buffer.writeln('Nombre${'Cantidad'.padLeft(lineWidth - 6)}');
+    for (final item in ticketItems) {
       buffer.writeln(rowQty(item.name, item.quantity));
       if (item.hamburgerConfig != null) {
         for (final line in _burgerDetailLines(item.hamburgerConfig!)) {
@@ -1574,22 +1767,193 @@ class _PosWindowViewState extends State<PosWindowView> {
       if (comment.isNotEmpty) {
         buffer.writeln('- ${normalize(comment).toUpperCase()}');
       }
-      buffer.writeln(divider());
     }
     return buffer.toString().trimRight();
   }
 
-  void _pay() {
-    if (_orderItems.isEmpty) return;
-    if (_isDelivery &&
-        (_selectedDeliveryAddress == null ||
-            _selectedDeliveryAddress!.trim().isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Las órdenes a domicilio requieren dirección.')),
-      );
-      return;
+  /// Genera una comanda de cocina profesional en bytes ESC/POS.
+  /// Incluye negritas, centrado, separadores y sanitización de acentos.
+  Uint8List _buildKitchenTicketEscPos({
+    List<OrderItemData>? items,
+    String? area,
+  }) {
+    final lineWidth = PrinterManager.instance.charsPerLine(PrinterDestination.kitchenTicket);
+    const qtyWidth = 4;
+    final ticketItems = items ?? _orderItems;
+    final ticketArea = area ?? _resolveItemArea(ticketItems.first);
+
+    String normalize(String value) =>
+        value.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    const monthsEs = [
+      'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+    ];
+    String formatDateTimeEs(DateTime value) {
+      final local = value.toLocal();
+      return '${local.day.toString().padLeft(2, '0')} ${monthsEs[local.month - 1]} ${local.year} '
+          '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
     }
+
+    String rowQty(String text, int qty) {
+      final maxNameWidth = lineWidth - qtyWidth - 1;
+      final name = normalize(text.toUpperCase());
+      final display =
+          name.length > maxNameWidth ? name.substring(0, maxNameWidth) : name;
+      return '${display.padRight(maxNameWidth)} ${qty.toString().padLeft(qtyWidth)}';
+    }
+
+    String headerRow() {
+      const label = 'PRODUCTO';
+      const qtyLabel = 'CANT.';
+      final spaces = lineWidth - label.length - qtyLabel.length;
+      return '$label${' ' * spaces}$qtyLabel';
+    }
+
+    String resolveComment() {
+      final notes = (widget.order.deliveryNotes ?? '').trim();
+      if (notes.isNotEmpty) return notes;
+      final name = (widget.order.customerName ?? '').trim();
+      final phone = (widget.order.customerPhone ?? '').trim();
+      if (name.isNotEmpty && phone.isNotEmpty) return '$name $phone';
+      return name.isNotEmpty ? name : phone;
+    }
+
+    final now = DateTime.now();
+    final receiptNo = widget.order.ticketNumber
+        .replaceAll('#', '')
+        .replaceAll(' ', '');
+
+    final b = EscPosBuilder()
+      ..init()
+      ..alignCenter()
+      ..boldOn()
+      ..doubleHeightOn()
+      ..line('COMANDA COCINA')
+      ..doubleHeightOff()
+      ..boldOff()
+      ..emptyLine()
+      ..alignLeft();
+
+    // Mesa
+    b
+      ..boldOn()
+      ..text('Mesa: ')
+      ..boldOff()
+      ..line(widget.order.tableNumber ?? '');
+
+    // Recibo
+    b
+      ..boldOn()
+      ..text('Recibo No.: ')
+      ..boldOff()
+      ..line(receiptNo);
+
+    // Area
+    b
+      ..boldOn()
+      ..text('Area: ')
+      ..boldOff()
+      ..line(ticketArea);
+
+    // Mesero
+    b
+      ..boldOn()
+      ..text('Mesero: ')
+      ..boldOff()
+      ..line(_session.userName ?? 'Sin cajero');
+
+    // Enviado
+    b
+      ..boldOn()
+      ..text('Enviado: ')
+      ..boldOff()
+      ..line(formatDateTimeEs(now));
+
+    b.separator('-', lineWidth);
+
+    // Header
+    b
+      ..boldOn()
+      ..line(headerRow())
+      ..boldOff();
+
+    b.separator('-', lineWidth);
+
+    for (final item in ticketItems) {
+      b.line(rowQty(item.name, item.quantity));
+      if (item.hamburgerConfig != null) {
+        for (final line in _burgerDetailLines(item.hamburgerConfig!)) {
+          b.line('  - ${normalize(line).toUpperCase()}');
+        }
+      } else if (item.wingsConfig != null) {
+        for (final line in _wingsDetailLines(item.wingsConfig!)) {
+          b.line('  - ${normalize(line).toUpperCase()}');
+        }
+      } else if (item.saladConfig != null) {
+        for (final line in _saladDetailLines(item.saladConfig!)) {
+          b.line('  - ${normalize(line).toUpperCase()}');
+        }
+      } else if (item.garlicBreadConfig != null) {
+        for (final line in _garlicBreadDetailLines(item.garlicBreadConfig!)) {
+          b.line('  - ${normalize(line).toUpperCase()}');
+        }
+      } else if (item.spaghettiConfig != null) {
+        for (final line in _spaghettiDetailLines(item.spaghettiConfig!)) {
+          b.line('  - ${normalize(line).toUpperCase()}');
+        }
+      } else if (item.pizzaConfig != null) {
+        for (final line in _pizzaDetailLinesForTicket(item.pizzaConfig!)) {
+          b.line('  - ${normalize(line).toUpperCase()}');
+        }
+      }
+      final comment = item.comment?.trim() ?? '';
+      if (comment.isNotEmpty) {
+        b.line('  - ${normalize(comment).toUpperCase()}');
+      }
+    }
+
+    b.separator('-', lineWidth);
+
+    final comment = resolveComment();
+    if (comment.isNotEmpty) {
+      b
+        ..boldOn()
+        ..line('Comentarios:')
+        ..boldOff()
+        ..line(comment);
+    }
+
+    b
+      ..emptyLine()
+      ..emptyLine()
+      ..feed(3)
+      ..cut();
+
+    return b.build();
+  }
+
+  Future<void> _pay() async {
+    if (_orderItems.isEmpty) return;
+    if (_isDelivery) {
+      final typedAddress = _deliveryAddressController.text.trim();
+      if (typedAddress.isNotEmpty &&
+          (_selectedDeliveryAddress == null ||
+              _selectedDeliveryAddress!.trim().isEmpty ||
+              _selectedDeliveryAddress!.trim().toLowerCase() != typedAddress.toLowerCase())) {
+        await _commitDeliveryAddress();
+      }
+      if (!mounted) return;
+      if (_selectedDeliveryAddress == null ||
+          _selectedDeliveryAddress!.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Las órdenes a domicilio requieren dirección.')),
+        );
+        return;
+      }
+    }
+    if (!mounted) return;
     widget.onProceedToPayment(
         _composeOrder(statusOverride: AppOrderStatus.awaitingPayment));
   }
@@ -1687,7 +2051,13 @@ class _PosWindowViewState extends State<PosWindowView> {
         if (!mounted) return;
         showPosSalesReportDialog(context);
       },
+      onPrinterSettings: () {
+        if (!mounted) return;
+        showPrinterSettingsDialog(context);
+      },
       onLogout: widget.onLogout,
+      onCustomers: widget.onCustomers,
+      onUsers: widget.onUsers,
     );
   }
 
@@ -1723,21 +2093,75 @@ class _PosWindowViewState extends State<PosWindowView> {
                   for (final guest in _guests)
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
-                      child: FilledButton(
-                        onPressed: () => setState(() {
-                          _currentGuest = guest.id;
-                          _emitOrderChanged();
-                        }),
-                        style: FilledButton.styleFrom(
-                            backgroundColor: _currentGuest == guest.id
-                                ? const Color(0xFF2563EB)
-                                : Colors.white,
-                            foregroundColor: _currentGuest == guest.id
-                                ? Colors.white
-                                : const Color(0xFF374151),
-                            side: const BorderSide(color: Color(0xFFD1D5DB))),
-                        child: Text(_displayGuestName(guest.name),
-                            style: const TextStyle(fontSize: 12)),
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          FilledButton(
+                            onPressed: () => setState(() {
+                              _currentGuest = guest.id;
+                              _emitOrderChanged();
+                            }),
+                            style: FilledButton.styleFrom(
+                                backgroundColor: _currentGuest == guest.id
+                                    ? const Color(0xFF2563EB)
+                                    : Colors.white,
+                                foregroundColor: _currentGuest == guest.id
+                                    ? Colors.white
+                                    : const Color(0xFF374151),
+                                side: const BorderSide(
+                                    color: Color(0xFFD1D5DB))),
+                            child: Text(_displayGuestName(guest.name),
+                                style: const TextStyle(fontSize: 12)),
+                          ),
+                          if (_guests.length > 1)
+                            Positioned(
+                              right: -6,
+                              top: -6,
+                              child: GestureDetector(
+                                onTap: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text('Eliminar cliente'),
+                                      content: Text(
+                                          '¿Eliminar a ${guest.name} y quitar sus productos?'),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.of(context)
+                                              .pop(false),
+                                          child:
+                                              Text(PosLabels.buttons.cancel),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => Navigator.of(context)
+                                              .pop(true),
+                                          child: const Text('Eliminar',
+                                              style: TextStyle(
+                                                  color: Color(0xFFDC2626))),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirm == true) {
+                                    _removeGuest(guest.id);
+                                  }
+                                },
+                                child: Container(
+                                  width: 16,
+                                  height: 16,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFDC2626),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.close,
+                                    size: 10,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   OutlinedButton.icon(
@@ -1876,40 +2300,63 @@ class _PosWindowViewState extends State<PosWindowView> {
           const SizedBox(height: 12),
           _ClientField(
             label: PosLabels.order.addressRequired,
-            child: DropdownButtonFormField<String>(
-              initialValue: _selectedDeliveryAddress,
-              isExpanded: true,
-              items: _deliveryAddresses
-                  .map(
-                    (address) => DropdownMenuItem<String>(
-                      value: address,
-                      child: Text(
-                        address,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+            child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: _deliveryAddressController,
+                      onChanged: _handleDeliveryAddressSearchChanged,
+                      onSubmitted: (_) => _commitDeliveryAddress(),
+                      onEditingComplete: _commitDeliveryAddress,
+                      decoration: InputDecoration(
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                        hintText: 'Escribe la dirección',
+                        suffixIcon: _deliveryAddressController.text.trim().isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 18),
+                                onPressed: () {
+                                  _deliveryAddressController.clear();
+                                  setState(() {
+                                    _deliveryAddressSuggestions = const [];
+                                    _applySelectedDeliveryAddress(null);
+                                  });
+                                  _emitOrderChanged();
+                                },
+                              )
+                            : null,
                       ),
                     ),
-                  )
-                  .toList(growable: false),
-              onChanged: (value) {
-                setState(() => _applySelectedDeliveryAddress(value));
-                _emitOrderChanged();
-              },
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                isDense: true,
-                hintText: PosLabels.order.selectAddress,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: _showAddAddressDialog,
-              icon: const Icon(Icons.add_location_alt_outlined, size: 16),
-              label: Text(PosLabels.order.addNewAddress),
-            ),
+                    if (_deliveryAddressSuggestions.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE5E7EB)),
+                        ),
+                        child: Column(
+                          children: [
+                            for (var i = 0; i < _deliveryAddressSuggestions.length; i++) ...[
+                              ListTile(
+                                dense: true,
+                                visualDensity: const VisualDensity(horizontal: 0, vertical: -2),
+                                title: Text(
+                                  _deliveryAddressSuggestions[i],
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                                trailing: const Icon(Icons.north_west, size: 16),
+                                onTap: () => _selectExistingDeliveryAddress(_deliveryAddressSuggestions[i]),
+                              ),
+                              if (i < _deliveryAddressSuggestions.length - 1)
+                                const Divider(height: 1),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
           ),
           const SizedBox(height: 12),
           _ClientField(
@@ -2029,7 +2476,7 @@ class _PosWindowViewState extends State<PosWindowView> {
     final response =
         await _session.apiClient.post('/auth/login', <String, dynamic>{
       'pin': '1234',
-      'sucursal_id': 1,
+      'sucursal_id': _session.branchId,
       'plataforma': 'pos_flutter',
     });
     if (response['success'] != true) {
@@ -2081,7 +2528,14 @@ class _PosWindowViewState extends State<PosWindowView> {
       '${raw['colonia'] ?? ''}'.trim(),
       '${raw['ciudad'] ?? ''}'.trim(),
     ].where((part) => part.isNotEmpty).toList(growable: false);
-    if (parts.isNotEmpty) return parts.join(', ');
+    if (parts.isNotEmpty) {
+      final label = parts.join(', ');
+      final ref = '${raw['referencia'] ?? ''}'.trim();
+      if (ref.isNotEmpty) return '$label ($ref)';
+      return label;
+    }
+    final ref = '${raw['referencia'] ?? ''}'.trim();
+    if (ref.isNotEmpty) return ref;
     return '${raw['alias'] ?? 'Dirección'}'.trim();
   }
 
@@ -2107,28 +2561,161 @@ class _PosWindowViewState extends State<PosWindowView> {
           : '${raw['place_id']}'.trim(),
       latitude: _toNullableDouble(raw['lat']),
       longitude: _toNullableDouble(raw['lng']),
-      reference: null,
+      reference: () {
+        final ref = '${raw['referencia'] ?? ''}'.trim();
+        return ref.isNotEmpty ? ref : null;
+      }(),
       details: () {
         final instructions = '${raw['instrucciones_entrega'] ?? ''}'.trim();
-        if (instructions.isNotEmpty) {
-          return instructions;
-        }
-        final legacyReference = '${raw['referencia'] ?? ''}'.trim();
-        return legacyReference.isNotEmpty ? legacyReference : null;
+        return instructions.isNotEmpty ? instructions : null;
       }(),
+      costoEnvio: _toNullableDouble(raw['costo_envio']),
     );
+  }
+
+  ({String address, String reference}) _stripReferenceFromAddress(String value) {
+    final trimmed = value.trim();
+    final match = RegExp(r'^(.*)\s*\(([^)]+)\)\s*$').firstMatch(trimmed);
+    if (match != null) {
+      final address = match.group(1)?.trim() ?? trimmed;
+      final reference = match.group(2)?.trim() ?? '';
+      return (address: address, reference: reference);
+    }
+    return (address: trimmed, reference: '');
+  }
+
+  void _handleDeliveryAddressSearchChanged(String value) {
+    _deliveryAddressDebounce?.cancel();
+    final query = value.trim().toLowerCase();
+    if (query.isEmpty) {
+      setState(() {
+        _deliveryAddressSuggestions = const [];
+        _applySelectedDeliveryAddress(null);
+      });
+      _emitOrderChanged();
+      return;
+    }
+    _deliveryAddressDebounce = Timer(const Duration(milliseconds: 200), () {
+      final matches = _deliveryAddresses
+          .where((address) => address.toLowerCase().contains(query))
+          .toList(growable: false);
+      setState(() => _deliveryAddressSuggestions = matches);
+    });
+  }
+
+  void _selectExistingDeliveryAddress(String label) {
+    _deliveryAddressController.text = label;
+    setState(() {
+      _deliveryAddressSuggestions = const [];
+      _applySelectedDeliveryAddress(label);
+    });
+    _emitOrderChanged();
+  }
+
+  Future<void> _commitDeliveryAddress() async {
+    final text = _deliveryAddressController.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _deliveryAddressSuggestions = const []);
+
+    final existing = _deliveryAddresses.firstWhere(
+      (address) => address.toLowerCase() == text.toLowerCase(),
+      orElse: () => '',
+    );
+    if (existing.isNotEmpty) {
+      _selectExistingDeliveryAddress(existing);
+      return;
+    }
+
+    await _saveNewDeliveryAddress(text);
+  }
+
+  Future<void> _saveNewDeliveryAddress(String address) async {
+    final customerId = _selectedCustomerId ?? 0;
+    final details = _deliveryNotesController.text.trim();
+    var option = _DeliveryAddressOption(
+      label: address,
+      address: address,
+      id: 0,
+      details: details.isNotEmpty ? details : null,
+    );
+
+    if (customerId > 0) {
+      try {
+        final response = await _session.apiClient.post(
+          '/customers/$customerId/addresses',
+          <String, dynamic>{
+            'alias': 'Dirección',
+            'calle': address,
+            'referencia': null,
+            'instrucciones_entrega': details.isNotEmpty ? details : null,
+            'place_id': null,
+            'lat': null,
+            'lng': null,
+            'activa': 1,
+          },
+        );
+        if (response['success'] == true && response['data'] is Map) {
+          option = _addressOptionFromJson(
+            (response['data'] as Map).cast<String, dynamic>(),
+          );
+        }
+      } catch (_) {
+        // Si falla el guardado remoto, seguimos usando la dirección local.
+      }
+    }
+
+    setState(() {
+      if (!_deliveryAddresses.contains(option.label)) {
+        _deliveryAddresses = [..._deliveryAddresses, option.label];
+      }
+      _deliveryAddressOptionsByLabel[option.label] = option;
+      if (option.id > 0) {
+        _deliveryAddressIdsByLabel[option.label] = option.id;
+      }
+      _applySelectedDeliveryAddress(option.label);
+    });
+    _emitOrderChanged();
   }
 
   void _applySelectedDeliveryAddress(String? label) {
     _selectedDeliveryAddress = label;
     if (label == null || label.trim().isEmpty) {
       _selectedCustomerAddressId = null;
+      _deliveryShippingController.text = '';
+      _deliveryAddressController.text = '';
       return;
     }
-
     final option = _deliveryAddressOptionsByLabel[label];
+    String displayAddress;
+    String? displayReference;
+    if (option != null && option.address.trim().isNotEmpty) {
+      final stripped = _stripReferenceFromAddress(option.address.trim());
+      displayAddress = stripped.address;
+      displayReference = option.reference?.trim().isNotEmpty == true
+          ? option.reference!.trim()
+          : (stripped.reference.isNotEmpty ? stripped.reference : null);
+    } else {
+      final stripped = _stripReferenceFromAddress(label);
+      displayAddress = stripped.address;
+      displayReference = stripped.reference.isNotEmpty ? stripped.reference : null;
+    }
+    _deliveryAddressController.text = displayAddress;
+
     _selectedCustomerAddressId =
         option != null && option.id > 0 ? option.id : null;
+    if (option?.costoEnvio != null && option!.costoEnvio! > 0) {
+      _deliveryShippingController.text = option.costoEnvio!.toStringAsFixed(2);
+    } else {
+      _deliveryShippingController.text = '';
+    }
+    final details = option?.details?.trim();
+    if (details != null && details.isNotEmpty) {
+      _deliveryNotesController.text = details;
+    } else if (displayReference != null && displayReference.isNotEmpty) {
+      _deliveryNotesController.text = displayReference;
+    } else {
+      _deliveryNotesController.text = '';
+    }
   }
 
   void _selectExistingCustomer(_CustomerSuggestion customer) {
@@ -2167,94 +2754,14 @@ class _PosWindowViewState extends State<PosWindowView> {
             _deliveryNotesController.text.trim().isEmpty) {
           _deliveryNotesController.text = selectedOption!.details!.trim();
         }
+        if (selectedOption?.costoEnvio != null && selectedOption!.costoEnvio! > 0) {
+          _deliveryShippingController.text = selectedOption.costoEnvio!.toStringAsFixed(2);
+        } else {
+          _deliveryShippingController.text = '';
+        }
       }
     });
 
-    _emitOrderChanged();
-  }
-
-  Future<void> _showAddAddressDialog() async {
-    try {
-      await _ensureCustomerSearchSession();
-    } catch (_) {
-      // En esta fase no bloqueamos el flujo de captura manual de dirección.
-    }
-    if (!mounted) return;
-    final selected = await showDialog<_DeliveryAddressOption>(
-      context: context,
-      builder: (context) => _AddressCaptureDialog(
-        addAddressLabel: PosLabels.order.addAddress,
-        addAddressHint: PosLabels.order.addAddressHint,
-        detailsLabel: 'Detalles de domicilio',
-        detailsHint: 'Entre calles, color de casa, indicaciones...',
-        coordinatesLabel: 'Coordenadas (opcional)',
-        coordinatesHint: 'Ej: 32.465617, -114.781193',
-        coordinatesExample: 'Ejemplo: 32.465617, -114.781193',
-        cancelLabel: PosLabels.buttons.cancel,
-        addLabel: PosLabels.buttons.add,
-      ),
-    );
-    if (selected == null || selected.label.trim().isEmpty) return;
-    var addressOption = selected;
-
-    final customerId = _selectedCustomerId ?? 0;
-    if (customerId > 0) {
-      try {
-        final response = await _session.apiClient.post(
-          '/customers/$customerId/addresses',
-          <String, dynamic>{
-            'alias': 'Dirección',
-            'calle': addressOption.address,
-            'referencia': null,
-            'instrucciones_entrega': addressOption.details,
-            'place_id': addressOption.placeId,
-            'lat': addressOption.latitude,
-            'lng': addressOption.longitude,
-            'activa': 1,
-          },
-        );
-
-        if (response['success'] == true && response['data'] is Map) {
-          addressOption = _addressOptionFromJson(
-            (response['data'] as Map).cast<String, dynamic>(),
-          );
-        } else if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                response['message']?.toString() ??
-                    'No se pudo guardar la dirección en base de datos.',
-              ),
-            ),
-          );
-        }
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'No se pudo guardar la dirección en base de datos.',
-              ),
-            ),
-          );
-        }
-      }
-    }
-
-    setState(() {
-      if (!_deliveryAddresses.contains(addressOption.label)) {
-        _deliveryAddresses = [..._deliveryAddresses, addressOption.label];
-      }
-      _deliveryAddressOptionsByLabel[addressOption.label] = addressOption;
-      if (addressOption.id > 0) {
-        _deliveryAddressIdsByLabel[addressOption.label] = addressOption.id;
-      }
-      _applySelectedDeliveryAddress(addressOption.label);
-      if ((addressOption.details ?? '').trim().isNotEmpty &&
-          _deliveryNotesController.text.trim().isEmpty) {
-        _deliveryNotesController.text = addressOption.details!.trim();
-      }
-    });
     _emitOrderChanged();
   }
 
@@ -2319,6 +2826,9 @@ class _PosWindowViewState extends State<PosWindowView> {
         )
         .toList(growable: false);
 
+    final subtotal = orderGrandTotal(order);
+    final shipping = order.deliveryShippingCost > 0 ? order.deliveryShippingCost : 0.0;
+
     return buildWhatsAppDeliveryMessage(
       WhatsAppDeliveryMessagePayload(
         ticket: order.ticketNumber,
@@ -2328,10 +2838,478 @@ class _PosWindowViewState extends State<PosWindowView> {
         reference: _resolveDeliveryReferenceForMessage(order),
         mapsLink: mapsLink,
         items: items,
-        total: orderGrandTotal(order),
+        subtotal: subtotal,
+        shippingCost: shipping,
+        total: (subtotal + shipping).toDouble(),
         observations: _resolveDeliveryObservationsForMessage(order),
       ),
     );
+  }
+
+  String _buildDeliveryTicketText() {
+    final order = _composeOrder();
+    final items = order.items
+        .map(
+          (item) => WhatsAppOrderLineItem(
+            quantity: item.quantity,
+            name: item.name,
+            modifiers: _orderItemDetailLinesForWhatsApp(item),
+          ),
+        )
+        .toList(growable: false);
+
+    final subtotal = orderGrandTotal(order);
+    final shipping = order.deliveryShippingCost > 0 ? order.deliveryShippingCost : 0.0;
+    final selectedOption = _selectedDeliveryAddressOption;
+    final rawAddress = (selectedOption?.address ?? order.deliveryAddress ?? '').trim();
+    final stripped = _stripReferenceFromAddress(rawAddress);
+
+    return buildWhatsAppDeliveryMessage(
+      WhatsAppDeliveryMessagePayload(
+        ticket: order.ticketNumber,
+        customer: (order.customerName ?? '').trim(),
+        phone: (order.customerPhone ?? '').trim(),
+        address: stripped.address,
+        reference: _resolveDeliveryReferenceForMessage(order).isNotEmpty
+            ? _resolveDeliveryReferenceForMessage(order)
+            : stripped.reference,
+        mapsLink: '',
+        items: items,
+        subtotal: subtotal,
+        shippingCost: shipping,
+        total: (subtotal + shipping).toDouble(),
+        observations: _resolveDeliveryObservationsForMessage(order),
+      ),
+    );
+  }
+
+  String _buildDeliveryOrderReceiptText(AppOrder order) {
+    final lineWidth = PrinterManager.instance.charsPerLine(PrinterDestination.customerReceipt);
+    const qtyWidth = 4;
+    const moneyWidth = 8;
+    final itemNameWidth = lineWidth - qtyWidth - moneyWidth - moneyWidth - 3;
+
+    String spaces(int count) => count <= 0 ? '' : ' ' * count;
+    String divider() => '-' * lineWidth;
+    String normalize(String value) =>
+        value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    String money(double value) => '\$${value.toStringAsFixed(2)}';
+
+    String center(String text) {
+      if (text.length >= lineWidth) return text;
+      final left = ((lineWidth - text.length) / 2).floor();
+      return '${spaces(left)}$text';
+    }
+
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    String formatDateTime(DateTime value) {
+      final local = value.toLocal();
+      return '${twoDigits(local.day)}/${twoDigits(local.month)}/${local.year} '
+          '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
+    }
+
+    List<String> wrapText(String text, int width) {
+      final source = normalize(text);
+      if (source.isEmpty) return const [''];
+      final words = source.split(' ');
+      final lines = <String>[];
+      var current = '';
+      for (final rawWord in words) {
+        var word = rawWord;
+        if (word.length > width) {
+          if (current.isNotEmpty) {
+            lines.add(current);
+            current = '';
+          }
+          while (word.length > width) {
+            lines.add(word.substring(0, width));
+            word = word.substring(width);
+          }
+          if (word.isEmpty) continue;
+        }
+        final candidate = current.isEmpty ? word : '$current $word';
+        if (candidate.length <= width) {
+          current = candidate;
+        } else {
+          if (current.isNotEmpty) lines.add(current);
+          current = word;
+        }
+      }
+      if (current.isNotEmpty) lines.add(current);
+      return lines;
+    }
+
+    String padOrTrim(String value, int width, {bool left = false}) {
+      final clean = normalize(value);
+      if (clean.length == width) return clean;
+      if (clean.length > width) return clean.substring(0, width);
+      return left ? clean.padLeft(width) : clean.padRight(width);
+    }
+
+    void writeKeyValue(StringBuffer out, String key, String value,
+        {bool wrapValue = false}) {
+      final cleanValue = normalize(value);
+      if (cleanValue.isEmpty) return;
+      final prefix = '$key: ';
+      if (!wrapValue || prefix.length + cleanValue.length <= lineWidth) {
+        out.writeln('$prefix$cleanValue');
+        return;
+      }
+      out.writeln(prefix);
+      for (final line in wrapText(cleanValue, lineWidth)) {
+        out.writeln(line);
+      }
+    }
+
+    final subtotal = orderGrandTotal(order);
+    final shipping =
+        order.deliveryShippingCost > 0 ? order.deliveryShippingCost : 0.0;
+    final total = subtotal + shipping;
+    final now = DateTime.now();
+    final ticketNumber = order.ticketNumber.replaceAll('#', '');
+    final option = _deliveryAddressOptionsByLabel[order.deliveryAddress?.trim() ?? ''];
+    final rawAddress = (option?.address ?? order.deliveryAddress ?? '').trim();
+    final stripped = _stripReferenceFromAddress(rawAddress);
+    final address = stripped.address;
+    final resolvedDetails = _resolveDeliveryReferenceForMessage(order);
+    final details = resolvedDetails.isNotEmpty ? resolvedDetails : stripped.reference;
+    final phone = (order.customerPhone ?? '').trim();
+    final customer =
+        (order.customerName ?? order.customerOrTable).trim().isEmpty
+            ? 'Cliente'
+            : (order.customerName ?? order.customerOrTable).trim();
+
+    final buffer = StringBuffer();
+    buffer.writeln(center('Rons Pizza'));
+    buffer.writeln(center('RFC ROGS5400720P64'));
+    buffer.writeln(center('CJON SONORA Y CALLE 7'));
+    buffer.writeln(center('TEL. 6536544050 - 6535346311'));
+    buffer.writeln(divider());
+    writeKeyValue(buffer, 'Ticket', ticketNumber);
+    writeKeyValue(buffer, 'Cajero', _session.userName ?? 'Sin cajero');
+    writeKeyValue(buffer, 'Hora', formatDateTime(now));
+    writeKeyValue(buffer, 'Tipo', 'Domicilio');
+    writeKeyValue(buffer, 'Cliente', customer, wrapValue: true);
+    if (phone.isNotEmpty) {
+      writeKeyValue(buffer, 'Telefono', phone);
+    }
+    if (address.isNotEmpty) {
+      writeKeyValue(buffer, 'Direccion', address, wrapValue: true);
+    }
+    if (details.isNotEmpty) {
+      writeKeyValue(buffer, 'Referencia', details, wrapValue: true);
+    }
+
+    buffer.writeln(divider());
+    buffer.writeln(
+      '${padOrTrim('Nombre', itemNameWidth)} '
+      '${padOrTrim('Cant', qtyWidth, left: true)} '
+      '${padOrTrim('Precio', moneyWidth, left: true)} '
+      '${padOrTrim('Total', moneyWidth, left: true)}',
+    );
+
+    for (final item in order.items) {
+      final lineTotal = item.price * item.quantity;
+      final nameLines = wrapText(item.name.toUpperCase(), itemNameWidth);
+      for (var i = 0; i < nameLines.length; i++) {
+        final isFirstLine = i == 0;
+        final qty = isFirstLine
+            ? padOrTrim(item.quantity.toString(), qtyWidth, left: true)
+            : spaces(qtyWidth);
+        final unit = isFirstLine
+            ? padOrTrim(money(item.price), moneyWidth, left: true)
+            : spaces(moneyWidth);
+        final totalLine = isFirstLine
+            ? padOrTrim(money(lineTotal), moneyWidth, left: true)
+            : spaces(moneyWidth);
+        buffer.writeln(
+            '${padOrTrim(nameLines[i], itemNameWidth)} $qty $unit $totalLine');
+      }
+
+      for (final modifier in _orderItemDetailLinesForWhatsApp(item)) {
+        for (final line in wrapText('- ${modifier.toUpperCase()}', lineWidth - 2)) {
+          buffer.writeln('  $line');
+        }
+      }
+    }
+
+    buffer.writeln(divider());
+    buffer.writeln(
+      '${padOrTrim('Subtotal', lineWidth - moneyWidth - 1)} '
+      '${padOrTrim(money(subtotal), moneyWidth, left: true)}',
+    );
+    buffer.writeln(
+      '${padOrTrim('Envio', lineWidth - moneyWidth - 1)} '
+      '${padOrTrim(money(shipping), moneyWidth, left: true)}',
+    );
+    buffer.writeln(
+      '${padOrTrim('Total', lineWidth - moneyWidth - 1)} '
+      '${padOrTrim(money(total), moneyWidth, left: true)}',
+    );
+    buffer.writeln(divider());
+    buffer.writeln(center('GRACIAS POR SU COMPRA'));
+    buffer.writeln('');
+    return buffer.toString().trimRight();
+  }
+
+  String _buildFullOrderReceiptText(AppOrder order) {
+    final lineWidth = PrinterManager.instance.charsPerLine(PrinterDestination.customerReceipt);
+    const qtyWidth = 4;
+    const moneyWidth = 8;
+    final itemNameWidth = lineWidth - qtyWidth - moneyWidth - moneyWidth - 3;
+
+    String spaces(int count) => count <= 0 ? '' : ' ' * count;
+    String divider() => '-' * lineWidth;
+    String normalize(String value) =>
+        value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    String money(double value) => '\$${value.toStringAsFixed(2)}';
+
+    String center(String text) {
+      if (text.length >= lineWidth) return text;
+      final left = ((lineWidth - text.length) / 2).floor();
+      return '${spaces(left)}$text';
+    }
+
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    String formatDateTime(DateTime value) {
+      final local = value.toLocal();
+      return '${twoDigits(local.day)}/${twoDigits(local.month)}/${local.year} '
+          '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
+    }
+
+    List<String> wrapText(String text, int width) {
+      final source = normalize(text);
+      if (source.isEmpty) return const [''];
+      final words = source.split(' ');
+      final lines = <String>[];
+      var current = '';
+      for (final rawWord in words) {
+        var word = rawWord;
+        if (word.length > width) {
+          if (current.isNotEmpty) {
+            lines.add(current);
+            current = '';
+          }
+          while (word.length > width) {
+            lines.add(word.substring(0, width));
+            word = word.substring(width);
+          }
+          if (word.isEmpty) continue;
+        }
+        final candidate = current.isEmpty ? word : '$current $word';
+        if (candidate.length <= width) {
+          current = candidate;
+        } else {
+          if (current.isNotEmpty) lines.add(current);
+          current = word;
+        }
+      }
+      if (current.isNotEmpty) lines.add(current);
+      return lines;
+    }
+
+    String padOrTrim(String value, int width, {bool left = false}) {
+      final clean = normalize(value);
+      if (clean.length == width) return clean;
+      if (clean.length > width) return clean.substring(0, width);
+      return left ? clean.padLeft(width) : clean.padRight(width);
+    }
+
+    void writeKeyValue(StringBuffer out, String key, String value,
+        {bool wrapValue = false}) {
+      final cleanValue = normalize(value);
+      if (cleanValue.isEmpty) return;
+      final prefix = '$key: ';
+      if (!wrapValue || prefix.length + cleanValue.length <= lineWidth) {
+        out.writeln('$prefix$cleanValue');
+        return;
+      }
+      out.writeln(prefix);
+      for (final line in wrapText(cleanValue, lineWidth)) {
+        out.writeln(line);
+      }
+    }
+
+    void writeGuestHeader(StringBuffer out, GuestData guest) {
+      out.writeln('');
+      out.writeln(center(_displayGuestName(guest.name).toUpperCase()));
+      out.writeln(divider());
+    }
+
+    final subtotal = orderGrandTotal(order);
+    final shipping = order.deliveryShippingCost > 0 ? order.deliveryShippingCost : 0.0;
+    final total = subtotal + shipping;
+    final now = DateTime.now();
+    final ticketNumber = order.ticketNumber.replaceAll('#', '');
+    final option = _deliveryAddressOptionsByLabel[order.deliveryAddress?.trim() ?? ''];
+    final rawAddress = (option?.address ?? order.deliveryAddress ?? '').trim();
+    final stripped = _stripReferenceFromAddress(rawAddress);
+    final address = stripped.address;
+    final resolvedDetails = _resolveDeliveryReferenceForMessage(order);
+    final details = resolvedDetails.isNotEmpty ? resolvedDetails : stripped.reference;
+    final phone = (order.customerPhone ?? '').trim();
+    final customer =
+        (order.customerName ?? order.customerOrTable).trim().isEmpty
+            ? 'Cliente'
+            : (order.customerName ?? order.customerOrTable).trim();
+
+    final buffer = StringBuffer();
+    buffer.writeln(center('Rons Pizza'));
+    buffer.writeln(center('RFC ROGS5400720P64'));
+    buffer.writeln(center('CJON SONORA Y CALLE 7'));
+    buffer.writeln(center('TEL. 6536544050 - 6535346311'));
+    buffer.writeln(divider());
+    writeKeyValue(buffer, 'Ticket', ticketNumber);
+    writeKeyValue(buffer, 'Cajero', _session.userName ?? 'Sin cajero');
+    writeKeyValue(buffer, 'Hora', formatDateTime(now));
+    writeKeyValue(buffer, 'Tipo', 'Domicilio');
+    writeKeyValue(buffer, 'Cliente', customer, wrapValue: true);
+    if (phone.isNotEmpty) {
+      writeKeyValue(buffer, 'Telefono', phone);
+    }
+    if (address.isNotEmpty) {
+      writeKeyValue(buffer, 'Direccion', address, wrapValue: true);
+    }
+    if (details.isNotEmpty) {
+      writeKeyValue(buffer, 'Referencia', details, wrapValue: true);
+    }
+
+    final showGuestHeaders = order.guests.length > 1;
+    for (final guest in order.guests) {
+      final guestItems = order.items.where((i) => i.guestId == guest.id).toList();
+      if (guestItems.isEmpty) continue;
+
+      if (showGuestHeaders) {
+        writeGuestHeader(buffer, guest);
+      } else {
+        buffer.writeln(divider());
+      }
+
+      buffer.writeln(
+        '${padOrTrim('Nombre', itemNameWidth)} '
+        '${padOrTrim('Cant', qtyWidth, left: true)} '
+        '${padOrTrim('Precio', moneyWidth, left: true)} '
+        '${padOrTrim('Total', moneyWidth, left: true)}',
+      );
+
+      for (final item in guestItems) {
+        final lineTotal = item.price * item.quantity;
+        final nameLines = wrapText(item.name.toUpperCase(), itemNameWidth);
+        for (var i = 0; i < nameLines.length; i++) {
+          final isFirstLine = i == 0;
+          final qty = isFirstLine
+              ? padOrTrim(item.quantity.toString(), qtyWidth, left: true)
+              : spaces(qtyWidth);
+          final unit = isFirstLine
+              ? padOrTrim(money(item.price), moneyWidth, left: true)
+              : spaces(moneyWidth);
+          final totalLine = isFirstLine
+              ? padOrTrim(money(lineTotal), moneyWidth, left: true)
+              : spaces(moneyWidth);
+          buffer.writeln(
+              '${padOrTrim(nameLines[i], itemNameWidth)} $qty $unit $totalLine');
+        }
+
+        for (final modifier in _orderItemDetailLinesForWhatsApp(item)) {
+          for (final line in wrapText('- ${modifier.toUpperCase()}', lineWidth - 2)) {
+            buffer.writeln('  $line');
+          }
+        }
+      }
+
+      final guestSubtotal = guestItems.fold<double>(
+        0.0,
+        (sum, item) => sum + item.price * item.quantity,
+      );
+      final guestTotalLabel = showGuestHeaders
+          ? 'Total ${_displayGuestName(guest.name)}'
+          : 'Total';
+      buffer.writeln(
+        '${padOrTrim(guestTotalLabel, lineWidth - moneyWidth - 1)} '
+        '${padOrTrim(money(guestSubtotal), moneyWidth, left: true)}',
+      );
+    }
+
+    buffer.writeln(divider());
+    buffer.writeln(
+      '${padOrTrim('Subtotal', lineWidth - moneyWidth - 1)} '
+      '${padOrTrim(money(subtotal), moneyWidth, left: true)}',
+    );
+    buffer.writeln(
+      '${padOrTrim('Envio', lineWidth - moneyWidth - 1)} '
+      '${padOrTrim(money(shipping), moneyWidth, left: true)}',
+    );
+    buffer.writeln(
+      '${padOrTrim('Total', lineWidth - moneyWidth - 1)} '
+      '${padOrTrim(money(total), moneyWidth, left: true)}',
+    );
+    buffer.writeln(divider());
+    buffer.writeln(center('GRACIAS POR SU COMPRA'));
+    buffer.writeln('');
+    return buffer.toString().trimRight();
+  }
+
+  Uint8List _buildReceiptEscPos(String plainText) {
+    final lines = plainText.split('\n');
+    final b = EscPosBuilder()
+      ..init()
+      ..selectFontA()
+      // Maximiza el ancho útil; el texto ya está formateado al ancho configurado.
+      ..leftMargin(0);
+
+    for (final rawLine in lines) {
+      final line = rawLine.trimRight();
+      final trimmed = line.trim();
+
+      final isHeaderCenterLine = trimmed == 'Rons Pizza' ||
+          trimmed == 'RONS PIZZA' ||
+          trimmed.startsWith('RFC ') ||
+          trimmed.startsWith('CJON ') ||
+          trimmed.startsWith('TEL. ');
+
+      if (isHeaderCenterLine) {
+        b
+          ..alignCenter()
+          ..boldOn();
+        if (trimmed == 'Rons Pizza' || trimmed == 'RONS PIZZA') {
+          b
+            ..doubleHeightOn()
+            ..line(trimmed)
+            ..doubleHeightOff();
+        } else {
+          b.line(trimmed);
+        }
+        b
+          ..boldOff()
+          ..alignLeft();
+        continue;
+      }
+
+      if (trimmed.toUpperCase().startsWith('GRACIAS')) {
+        b
+          ..alignCenter()
+          ..line(trimmed)
+          ..alignLeft();
+        continue;
+      }
+
+      final upper = trimmed.toUpperCase();
+      final isBoldLine = upper.startsWith('TOTAL') ||
+          upper.startsWith('SUBTOTAL') ||
+          upper.startsWith('ENVIO');
+      if (isBoldLine) {
+        b.boldOn().line(line).boldOff();
+      } else {
+        b.line(line);
+      }
+    }
+
+    b.emptyLine().emptyLine().feed(4).cut();
+    return b.build();
+  }
+
+  Uint8List _buildDeliveryOrderReceiptEscPos(AppOrder order) {
+    return _buildReceiptEscPos(_buildDeliveryOrderReceiptText(order));
   }
 
   Future<void> _copyOrderForWhatsApp() async {
@@ -2360,11 +3338,78 @@ class _PosWindowViewState extends State<PosWindowView> {
     }
   }
 
-  Future<void> _openWhatsAppWeb() async {
-    final launched = await openWhatsAppWeb();
-    if (!launched && mounted) {
+  Future<void> _printDeliveryOrderTicket() async {
+    final order = _composeOrder();
+    if (order.items.isEmpty) return;
+
+    final ticketText = _buildDeliveryOrderReceiptText(order);
+    if (ticketText.trim().isEmpty) return;
+
+    try {
+      final printer =
+          PrinterManager.instance.resolvePrinter(PrinterDestination.customerReceipt);
+      if (printer != null && printer.driver == PrinterDriver.pdf) {
+        if (!mounted) return;
+        await showPrinterPreviewDialog(
+          context,
+          title: 'Pedido a domicilio',
+          ticketText: ticketText,
+        );
+        return;
+      }
+
+      final bytes = _buildDeliveryOrderReceiptEscPos(order);
+      await PrinterManager.instance.printEscPosTicket(
+        destination: PrinterDestination.customerReceipt,
+        bytes: bytes,
+      );
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No fue posible abrir WhatsApp Web.')),
+        const SnackBar(content: Text('Pedido a domicilio enviado a impresión')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo imprimir pedido a domicilio: $error')),
+      );
+    }
+  }
+
+  Future<void> _printFullOrderTicket() async {
+    final order = _composeOrder();
+    if (order.items.isEmpty) return;
+
+    final ticketText = _buildFullOrderReceiptText(order);
+    if (ticketText.trim().isEmpty) return;
+
+    try {
+      final printer =
+          PrinterManager.instance.resolvePrinter(PrinterDestination.customerReceipt);
+      final isPdf = printer != null && printer.driver == PrinterDriver.pdf;
+
+      if (isPdf) {
+        if (!mounted) return;
+        await showPrinterPreviewDialog(
+          context,
+          title: 'Ticket',
+          ticketText: ticketText,
+        );
+        return;
+      }
+
+      final bytes = _buildReceiptEscPos(ticketText);
+      await PrinterManager.instance.printEscPosTicket(
+        destination: PrinterDestination.customerReceipt,
+        bytes: bytes,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ticket enviado a impresión')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo imprimir ticket: $error')),
       );
     }
   }
@@ -2495,14 +3540,6 @@ class _PosWindowViewState extends State<PosWindowView> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      Text(
-                        PosLabels.order.deliveryShippingNotInRegister,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade600,
-                          height: 1.2,
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -2541,9 +3578,10 @@ class _PosWindowViewState extends State<PosWindowView> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: _orderItems.isEmpty ? null : _openWhatsAppWeb,
-                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                    label: const Text('Abrir WhatsApp'),
+                    onPressed:
+                        _orderItems.isEmpty ? null : _printDeliveryOrderTicket,
+                    icon: const Icon(Icons.print_rounded, size: 16),
+                    label: const Text('Imprimir pedido a domicilio'),
                   ),
                 ),
               ],
@@ -2553,17 +3591,34 @@ class _PosWindowViewState extends State<PosWindowView> {
           Row(
             children: [
               Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _orderItems.isEmpty ? null : _printFullOrderTicket,
+                  icon: const Icon(Icons.receipt_long_rounded, size: 16),
+                  label: const Text('Imprimir ticket'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
                   child: FilledButton.icon(
                       onPressed: _orderItems.isEmpty ? null : _sendToKitchen,
-                      icon: const Icon(Icons.send_rounded, size: 16),
-                      label: Text(PosLabels.common.sendToKitchen),
+                      icon: Icon(
+                        _hasUnsentItems ? Icons.send_rounded : Icons.print,
+                        size: 16,
+                      ),
+                      label: Text(_hasUnsentItems
+                          ? PosLabels.common.sendToKitchen
+                          : PosLabels.buttons.reprintTicket),
                       style: FilledButton.styleFrom(
                           backgroundColor: const Color(0xFFF97316),
                           foregroundColor: Colors.white))),
               const SizedBox(width: 8),
               Expanded(
                   child: FilledButton(
-                      onPressed: _orderItems.isEmpty ? null : _pay,
+                      onPressed: _orderItems.isEmpty ? null : () => _pay(),
                       style: FilledButton.styleFrom(
                           backgroundColor: const Color(0xFF16A34A),
                           foregroundColor: Colors.white),
@@ -3121,6 +4176,7 @@ class _DeliveryAddressOption {
     this.longitude,
     this.reference,
     this.details,
+    this.costoEnvio,
   });
 
   final String label;
@@ -3131,6 +4187,7 @@ class _DeliveryAddressOption {
   final double? longitude;
   final String? reference;
   final String? details;
+  final double? costoEnvio;
 }
 
 class _AddressCaptureDialog extends StatefulWidget {
@@ -3529,6 +4586,9 @@ class _OrderItemRow extends StatelessWidget {
     if (config.extraIngredients.isNotEmpty) {
       lines.add('Extras: ${config.extraIngredients.join(', ')}');
     }
+    if (config.promoPizzaMediana) {
+      lines.add('Promo pizza mediana');
+    }
     if (config.includePromoGarlicBread) {
       lines.add('Panes de ajo promo');
     }
@@ -3718,6 +4778,12 @@ class _OrderItemRow extends StatelessWidget {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis),
                       ),
+                      if (item.sentToKitchen)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: Icon(Icons.check_circle,
+                              size: 14, color: Color(0xFF16A34A)),
+                        ),
                       if (hasComment)
                         const Padding(
                           padding: EdgeInsets.only(left: 4),

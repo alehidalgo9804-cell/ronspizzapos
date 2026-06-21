@@ -9,10 +9,12 @@ class PizzaBuilderView extends StatefulWidget {
     super.key,
     required this.onBack,
     required this.onAddPizza,
+    this.existingPizzaCount = 0,
   });
 
   final VoidCallback onBack;
   final AddPizzaCallback onAddPizza;
+  final int existingPizzaCount;
 
   @override
   State<PizzaBuilderView> createState() => _PizzaBuilderViewState();
@@ -21,6 +23,7 @@ class PizzaBuilderView extends StatefulWidget {
 class _PizzaBuilderViewState extends State<PizzaBuilderView> {
   static const String _defaultSpecialty = 'Pepperoni';
   static const double _promoGarlicBreadPrice = 39;
+  static const double _promoPizzaMedianaBasePrice = 249;
 
   static const List<String> _specialties = [
     'Pepperoni',
@@ -173,6 +176,7 @@ class _PizzaBuilderViewState extends State<PizzaBuilderView> {
       crustHalf1: _splitCrustHalf1,
       crustHalf2: _splitCrustHalf2,
       includePromoGarlicBread: false,
+      promoPizzaMediana: false,
     );
   }
 
@@ -212,8 +216,13 @@ class _PizzaBuilderViewState extends State<PizzaBuilderView> {
   }
 
   double _calculatePrice() {
-    final sizePrice =
+    final regularSizePrice =
         _sizes.firstWhere((size) => size.name == _config.size).price;
+    final promoBasePrice = widget.existingPizzaCount.isOdd
+        ? 0.0
+        : _promoPizzaMedianaBasePrice;
+    final sizePrice =
+        _config.promoPizzaMediana ? promoBasePrice : regularSizePrice;
     final crustPrice = _config.crustEdge == 'Regular' ? 0 : _currentCrustPrice;
     final breadPrice = _breadTypes
         .firstWhere((bread) => bread.name == _config.breadType)
@@ -248,6 +257,7 @@ class _PizzaBuilderViewState extends State<PizzaBuilderView> {
     String? crustHalf1,
     String? crustHalf2,
     bool? includePromoGarlicBread,
+    bool? promoPizzaMediana,
   }) {
     _config = PizzaConfigData(
       specialty: specialty ?? _config.specialty,
@@ -270,6 +280,7 @@ class _PizzaBuilderViewState extends State<PizzaBuilderView> {
       crustHalf2: crustHalf2 ?? _config.crustHalf2,
       includePromoGarlicBread:
           includePromoGarlicBread ?? _config.includePromoGarlicBread,
+      promoPizzaMediana: promoPizzaMediana ?? _config.promoPizzaMediana,
     );
   }
 
@@ -451,6 +462,31 @@ class _PizzaBuilderViewState extends State<PizzaBuilderView> {
     });
   }
 
+  void _selectSize(String size) {
+    setState(() {
+      final disablePromoPizzaMediana =
+          _config.promoPizzaMediana && size != 'Mediana';
+      _updateConfig(
+        size: size,
+        promoPizzaMediana:
+            disablePromoPizzaMediana ? false : _config.promoPizzaMediana,
+      );
+    });
+  }
+
+  void _togglePromoPizzaMediana() {
+    setState(() {
+      if (_config.promoPizzaMediana) {
+        _updateConfig(promoPizzaMediana: false);
+        return;
+      }
+      _updateConfig(
+        size: 'Mediana',
+        promoPizzaMediana: true,
+      );
+    });
+  }
+
   void _selectSplitCrustHalf(int half, String value) {
     setState(() {
       if (half == 1) {
@@ -503,6 +539,7 @@ class _PizzaBuilderViewState extends State<PizzaBuilderView> {
       crustHalf2:
           _config.crustEdge == 'Orilla Mitad y Mitad' ? _splitCrustHalf2 : null,
       includePromoGarlicBread: _includePromoGarlicBread,
+      promoPizzaMediana: _config.promoPizzaMediana,
     );
     widget.onAddPizza(finalConfig, _calculatePrice());
   }
@@ -588,6 +625,14 @@ class _PizzaBuilderViewState extends State<PizzaBuilderView> {
                                     value: _config.specialty),
                               _SummaryRow(
                                   label: 'Tamaño:', value: _config.size),
+                              _SummaryRow(
+                                label: 'Promo mediana:',
+                                value: _config.promoPizzaMediana
+                                    ? (widget.existingPizzaCount.isOdd
+                                        ? 'Sí (base \$0.00)'
+                                        : 'Sí (base \$249.00)')
+                                    : 'No',
+                              ),
                               if (_config.crustEdge ==
                                   'Orilla Mitad y Mitad') ...[
                                 const _SummaryRow(
@@ -703,6 +748,28 @@ class _PizzaBuilderViewState extends State<PizzaBuilderView> {
                               backgroundColor: const Color(0xFF16A34A),
                               foregroundColor: Colors.white,
                               minimumSize: const Size(0, 52),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: _togglePromoPizzaMediana,
+                            icon: const Icon(Icons.local_offer_outlined),
+                            label: Text(
+                              _config.promoPizzaMediana
+                                  ? 'Promo pizza mediana activada'
+                                  : 'Promo pizza mediana',
+                            ),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: _config.promoPizzaMediana
+                                  ? const Color(0xFFB91C1C)
+                                  : const Color(0xFFE5E7EB),
+                              foregroundColor: _config.promoPizzaMediana
+                                  ? Colors.white
+                                  : const Color(0xFF374151),
+                              minimumSize: const Size(0, 50),
                             ),
                           ),
                         ),
@@ -993,8 +1060,7 @@ class _PizzaBuilderViewState extends State<PizzaBuilderView> {
                                 price: size.price,
                                 active: _config.size == size.name,
                                 color: const Color(0xFF2563EB),
-                                onTap: () => setState(
-                                    () => _updateConfig(size: size.name)),
+                                onTap: () => _selectSize(size.name),
                               ))
                           .toList(growable: false),
                     ),
