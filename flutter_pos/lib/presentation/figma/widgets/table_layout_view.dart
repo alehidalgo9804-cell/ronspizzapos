@@ -17,6 +17,8 @@ class TableLayoutView extends StatelessWidget {
     required this.tables,
     required this.orders,
     required this.deliveryDriverOptions,
+    required this.categories,
+    required this.products,
     required this.onSelectTable,
     required this.onOpenOrder,
     required this.onReprintOrder,
@@ -24,11 +26,14 @@ class TableLayoutView extends StatelessWidget {
     this.onLogout,
     this.onCustomers,
     this.onUsers,
+    this.onPrices,
   });
 
   final List<TableInfo> tables;
   final List<AppOrder> orders;
   final List<String> deliveryDriverOptions;
+  final List<CategoryData> categories;
+  final List<ProductData> products;
   final ValueChanged<String> onSelectTable;
   final ValueChanged<String> onOpenOrder;
   final Future<void> Function(AppOrder order) onReprintOrder;
@@ -37,6 +42,7 @@ class TableLayoutView extends StatelessWidget {
   final VoidCallback? onLogout;
   final VoidCallback? onCustomers;
   final VoidCallback? onUsers;
+  final VoidCallback? onPrices;
 
   Color _statusColor(TableStatus status) {
     switch (status) {
@@ -66,6 +72,8 @@ class TableLayoutView extends StatelessWidget {
       tables: tables,
       orders: orders,
       deliveryDriverOptions: deliveryDriverOptions,
+      categories: categories,
+      products: products,
       onSelectTable: onSelectTable,
       onOpenOrder: onOpenOrder,
       onReprintOrder: onReprintOrder,
@@ -73,6 +81,7 @@ class TableLayoutView extends StatelessWidget {
       onLogout: onLogout,
       onCustomers: onCustomers,
       onUsers: onUsers,
+      onPrices: onPrices,
       statusColor: _statusColor,
       statusText: _statusText,
     );
@@ -84,6 +93,8 @@ class _TableLayoutContent extends StatefulWidget {
     required this.tables,
     required this.orders,
     required this.deliveryDriverOptions,
+    required this.categories,
+    required this.products,
     required this.onSelectTable,
     required this.onOpenOrder,
     required this.onReprintOrder,
@@ -93,11 +104,14 @@ class _TableLayoutContent extends StatefulWidget {
     required this.statusText,
     this.onCustomers,
     this.onUsers,
+    this.onPrices,
   });
 
   final List<TableInfo> tables;
   final List<AppOrder> orders;
   final List<String> deliveryDriverOptions;
+  final List<CategoryData> categories;
+  final List<ProductData> products;
   final ValueChanged<String> onSelectTable;
   final ValueChanged<String> onOpenOrder;
   final Future<void> Function(AppOrder order) onReprintOrder;
@@ -106,6 +120,7 @@ class _TableLayoutContent extends StatefulWidget {
   final VoidCallback? onLogout;
   final VoidCallback? onCustomers;
   final VoidCallback? onUsers;
+  final VoidCallback? onPrices;
   final Color Function(TableStatus) statusColor;
   final String Function(TableStatus) statusText;
 
@@ -377,6 +392,10 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
                     const SizedBox(height: 8),
                     Text(
                         '${PosLabels.payment.orderTotal}: \$${orderTotalValue.toStringAsFixed(2)}'),
+                    if (order.orderType == 'Delivery' &&
+                        order.deliveryShippingCost > 0)
+                      Text(
+                          '${PosLabels.order.deliveryShippingCost}: \$${order.deliveryShippingCost.toStringAsFixed(2)}'),
                     Text(
                         '${PosLabels.payment.cash}: \$${(order.paymentCashAmount ?? 0).toStringAsFixed(2)}'),
                     if ((order.paymentUsdAmount ?? 0) > 0) ...[
@@ -459,6 +478,7 @@ class _TableLayoutContentState extends State<_TableLayoutContent> {
       onLogout: widget.onLogout,
       onCustomers: widget.onCustomers,
       onUsers: widget.onUsers,
+      onPrices: widget.onPrices,
     );
   }
 

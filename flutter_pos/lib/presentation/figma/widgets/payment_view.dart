@@ -10,6 +10,8 @@ class PaymentView extends StatefulWidget {
     required this.ticketNumber,
     required this.tableNumber,
     required this.orderTotal,
+    required this.deliveryShippingCost,
+    required this.isDelivery,
     required this.orderItems,
     required this.guests,
     required this.onCancel,
@@ -20,6 +22,8 @@ class PaymentView extends StatefulWidget {
   final String ticketNumber;
   final String tableNumber;
   final double orderTotal;
+  final double deliveryShippingCost;
+  final bool isDelivery;
   final List<OrderItemData> orderItems;
   final List<GuestData> guests;
   final VoidCallback onCancel;
@@ -250,6 +254,32 @@ class _PaymentViewState extends State<PaymentView> {
                     ],
                   ),
                 ),
+                if (widget.isDelivery && widget.deliveryShippingCost > 0) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9FAFB),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${PosLabels.order.deliveryShippingCost}:',
+                          style: TextStyle(color: Color(0xFF6B7280)),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '\$${widget.deliveryShippingCost.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 _PaymentInputRow(
                   label: PosLabels.payment.cash,

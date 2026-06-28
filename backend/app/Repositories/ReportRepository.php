@@ -77,12 +77,29 @@ final class ReportRepository
         $paymentStmt->execute($params);
         $paymentMethods = $paymentStmt->fetchAll(PDO::FETCH_ASSOC);
 
+        $shippingStmt = $this->db->prepare(
+            "SELECT
+                COUNT(DISTINCT p.id) AS delivery_orders,
+                COALESCE(SUM(e.costo_envio), 0) AS total_shipping,
+                COALESCE(SUM(e.bono_repartidor), 0) AS total_bonus
+             FROM pedidos p
+             LEFT JOIN entregas e ON e.pedido_id = p.id
+             WHERE {$whereSql}
+               AND p.tipo_pedido = 'delivery'
+               AND p.estado NOT IN ('cancelado', 'cancelled')"
+        );
+        $shippingStmt->execute($params);
+        $shippingSummary = $shippingStmt->fetch(PDO::FETCH_ASSOC);
+
         return [
             'branch_id' => $branchId,
             'summary' => [
                 'total_ventas' => (float) ($summary['total_ventas'] ?? 0),
                 'total_pedidos' => (int) ($summary['total_pedidos'] ?? 0),
                 'ticket_promedio' => (float) ($summary['ticket_promedio'] ?? 0),
+                'delivery_orders' => (int) ($shippingSummary['delivery_orders'] ?? 0),
+                'delivery_shipping' => (float) ($shippingSummary['total_shipping'] ?? 0),
+                'delivery_bonus' => (float) ($shippingSummary['total_bonus'] ?? 0),
             ],
             'channels' => array_map(static function ($row): array {
                 return [

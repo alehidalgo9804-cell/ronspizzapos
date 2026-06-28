@@ -19,6 +19,7 @@ import 'widgets/customers_view.dart';
 import 'widgets/payment_view.dart';
 import 'widgets/pos_pin_login_view.dart';
 import 'widgets/pos_printer_preview_dialog.dart';
+import 'widgets/pos_prices_view.dart';
 import 'widgets/pos_window_view.dart';
 import 'widgets/pos_users_view.dart';
 import 'widgets/table_layout_view.dart';
@@ -42,6 +43,8 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
   final Map<String, int> _paymentMethodIdsByKey = <String, int>{};
   final Map<String, int> _driverIdsByLabel = <String, int>{};
   final List<String> _deliveryDriverOptions = <String>[];
+  List<CategoryData> _catalogCategories = List<CategoryData>.from(categories);
+  List<ProductData> _catalogProducts = List<ProductData>.from(products);
   bool _isSyncingPayment = false;
   bool _isAuthenticating = false;
   String? _authError;
@@ -340,6 +343,10 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     setState(() => _currentView = PosView.users);
   }
 
+  void _goToPrices() {
+    setState(() => _currentView = PosView.prices);
+  }
+
   void _handleLogout() {
     _draftSyncTimer?.cancel();
     _stopOrdersStream();
@@ -351,6 +358,8 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
       _isSyncingPayment = false;
       _currentView = PosView.tables;
       _activeOrderId = null;
+      _catalogCategories = List<CategoryData>.from(categories);
+      _catalogProducts = List<ProductData>.from(products);
     });
   }
 
@@ -382,6 +391,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (_session.isAuthenticated) {
         if (_ordersStreamConnected) return;
+        if (_currentView == PosView.payment) return;
         _loadOrdersFromBackend();
       }
     });
@@ -834,6 +844,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     if (_session.isAuthenticated) {
       await _loadPaymentMethods();
       await _loadDeliveryDrivers();
+      await _loadCatalog();
       return;
     }
 
@@ -878,6 +889,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
 
     await _loadPaymentMethods();
     await _loadDeliveryDrivers();
+    await _loadCatalog();
     await _loadOrdersFromBackend();
     await _startOrdersStream();
     _startPeriodicRefresh();
@@ -924,8 +936,20 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
 
   Future<void> _loadDeliveryDrivers() async {
     if (!_session.isAuthenticated) return;
-    final response = await _session.apiClient.get('/drivers?limit=200');
-    if (response['success'] != true) return;
+    final response = await _session.apiClient.get('/delivery-driver-options');
+    debugPrint('[DeliveryDrivers] response: $response');
+    if (response['success'] != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error cargando repartidores: ${response['message'] ?? 'desconocido'}',
+            ),
+          ),
+        );
+      }
+      return;
+    }
 
     final rows = (response['data'] as List? ?? const []);
     final labels = <String>[];
@@ -934,17 +958,13 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     for (final row in rows) {
       final map = (row as Map?)?.cast<String, dynamic>();
       if (map == null) continue;
-      final isActive = _toInt(map['activo'], fallback: 1) == 1;
-      if (!isActive) continue;
 
       final id = _toInt(map['id']);
       if (id <= 0) continue;
 
-      final firstName = '${map['nombre'] ?? ''}'.trim();
-      final lastName = '${map['apellidos'] ?? map['apellido'] ?? ''}'.trim();
-      final label = '$firstName $lastName'.trim().isEmpty
+      final label = '${map['nombre_completo'] ?? ''}'.trim().isEmpty
           ? 'Repartidor $id'
-          : '$firstName $lastName'.trim();
+          : '${map['nombre_completo']}'.trim();
 
       if (!labels.contains(label)) {
         labels.add(label);
@@ -962,6 +982,103 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
         ..clear()
         ..addAll(byLabel);
     });
+    // Se omiten advertencias cuando no hay repartidores; no todos los flujos requieren uno.
+  }
+
+  Future<void> _loadCatalog() async {
+    if (!_session.isAuthenticated) return;
+    try {
+      final responses = await Future.wait([
+        _session.apiClient.get('/categories?active=1'),
+        _session.apiClient.get('/products?visible_pos=1&limit=1000'),
+      ]);
+      final categoriesResponse = responses[0];
+      final productsResponse = responses[1];
+      if (categoriesResponse['success'] != true || productsResponse['success'] != true) {
+        return;
+      }
+
+      final backendCategories = (categoriesResponse['data'] as List? ?? const [])
+          .map((e) => (e as Map).cast<String, dynamic>())
+          .toList();
+      final backendProducts = (productsResponse['data'] as List? ?? const [])
+          .map((e) => (e as Map).cast<String, dynamic>())
+          .toList();
+
+      const slugToPosId = {
+        'pizzas': 'pizzas',
+        'hamburguesas': 'hamburgers',
+        'alitas': 'wings',
+        'boneless': 'boneless',
+        'spaghetti': 'spaghetti',
+        'salsas': 'sauces',
+        'bebidas': 'drinks',
+        'extras': 'extras',
+        'complements': 'extras',
+        'menu_estadio': 'menu_estadio',
+      };
+
+      final categorySlugsById = <int, String>{};
+      for (final c in backendCategories) {
+        final id = _toInt(c['id']);
+        if (id <= 0) continue;
+        categorySlugsById[id] = '${c['slug'] ?? ''}'.trim().toLowerCase();
+      }
+
+      final backendCategoryData = <CategoryData>[];
+      for (final c in backendCategories) {
+        final slug = '${c['slug'] ?? ''}'.trim().toLowerCase();
+        final id = slugToPosId[slug] ?? slug;
+        if (id.isEmpty) continue;
+        backendCategoryData.add(CategoryData(
+          id: id,
+          code: '${c['slug'] ?? ''}'.toUpperCase(),
+          name: '${c['nombre'] ?? ''}'.trim(),
+          image: '${c['imagen_url'] ?? ''}'.trim(),
+        ));
+      }
+
+      final backendProductData = <ProductData>[];
+      for (final p in backendProducts) {
+        final categoryId = _toInt(p['categoria_id']);
+        final categorySlug = categorySlugsById[categoryId] ?? '';
+        final posCategoryId = slugToPosId[categorySlug] ?? categorySlug;
+        if (posCategoryId.isEmpty) continue;
+        final id = '${p['id'] ?? ''}';
+        if (id.isEmpty) continue;
+        final image = '${p['imagen_url'] ?? ''}'.trim();
+        backendProductData.add(ProductData(
+          id: id,
+          name: '${p['nombre'] ?? ''}'.trim(),
+          price: _toDouble(p['precio_base']),
+          categoryId: posCategoryId,
+          image: image.isEmpty ? null : image,
+        ));
+      }
+
+      if (!mounted) return;
+      setState(() {
+        final categoryMap = <String, CategoryData>{};
+        for (final c in categories) {
+          categoryMap[c.id] = c;
+        }
+        for (final c in backendCategoryData) {
+          categoryMap[c.id] = c;
+        }
+        _catalogCategories = categoryMap.values.toList();
+
+        final productMap = <String, ProductData>{};
+        for (final p in products) {
+          productMap[p.id] = p;
+        }
+        for (final p in backendProductData) {
+          productMap[p.id] = p;
+        }
+        _catalogProducts = productMap.values.toList();
+      });
+    } catch (_) {
+      // Si falla la carga remota, se mantiene el catálogo mock actual.
+    }
   }
 
   Future<void> _handleAssignDeliveryDriver(
@@ -1341,7 +1458,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
     _ordersReloadQueued = true;
     Future<void>.delayed(const Duration(milliseconds: 250), () async {
       try {
-        if (_session.isAuthenticated) {
+        if (_session.isAuthenticated && _currentView != PosView.payment) {
           await _loadOrdersFromBackend();
         }
       } finally {
@@ -1733,6 +1850,13 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
       if (customerBlock.isNotEmpty) {
         writeKeyValue(buffer, 'Cliente', customerBlock, wrapValue: true);
       }
+      writeKeyValue(
+        buffer,
+        'Repartidor',
+        (order.deliveryDriver ?? '').trim().isNotEmpty
+            ? order.deliveryDriver!
+            : 'Sin repartidor',
+      );
     }
     buffer.writeln(divider());
     buffer.writeln(
@@ -1927,6 +2051,8 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           tables: _tables,
           orders: _orders,
           deliveryDriverOptions: _deliveryDriverOptions,
+          categories: _catalogCategories,
+          products: _catalogProducts,
           onSelectTable: _openOrCreateOrderFromTable,
           onOpenOrder: _openOrderById,
           onReprintOrder: _handleReprintCompletedOrder,
@@ -1934,6 +2060,7 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           onLogout: _handleLogout,
           onCustomers: _goToCustomers,
           onUsers: _goToUsers,
+          onPrices: _goToPrices,
         );
       case PosView.pos:
         if (_activeOrder == null) {
@@ -1947,9 +2074,13 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           onOrderChanged: _handleOrderChanged,
           onSaveCustomer: _saveCustomerFromPos,
           onProceedToPayment: _handleProceedToPayment,
+          deliveryDriverOptions: _deliveryDriverOptions,
+          categories: _catalogCategories,
+          products: _catalogProducts,
           onLogout: _handleLogout,
           onCustomers: _goToCustomers,
           onUsers: _goToUsers,
+          onPrices: _goToPrices,
         );
       case PosView.payment:
         if (_activeOrder == null) {
@@ -1957,8 +2088,10 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
             body: Center(child: Text(PosLabels.common.orderNotFound)),
           );
         }
-        final paymentTotal = orderGrandTotal(_activeOrder!);
-        final paymentLabel = _activeOrder!.orderType == 'Delivery'
+        final isDelivery = _activeOrder!.orderType == 'Delivery';
+        final shippingCost = isDelivery ? _activeOrder!.deliveryShippingCost : 0.0;
+        final paymentTotal = orderGrandTotal(_activeOrder!) + shippingCost;
+        final paymentLabel = isDelivery
             ? 'Domicilio'
             : (_activeOrder!.tableNumber != null
                 ? 'Mesa ${_activeOrder!.tableNumber}'
@@ -1968,6 +2101,8 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           ticketNumber: _activeOrder!.ticketNumber,
           tableNumber: paymentLabel,
           orderTotal: paymentTotal,
+          deliveryShippingCost: shippingCost,
+          isDelivery: isDelivery,
           orderItems: _activeOrder!.items,
           guests: _activeOrder!.guests.isNotEmpty
               ? _activeOrder!.guests
@@ -1991,6 +2126,13 @@ class _FigmaPosShellState extends State<FigmaPosShell> {
           body: Center(
             child: Text('Sucursales'),
           ),
+        );
+      case PosView.prices:
+        return PosPricesView(
+          apiClient: _session.apiClient,
+          onBack: _handleBackToTables,
+          onPricesChanged: _loadCatalog,
+          posCategories: _catalogCategories,
         );
     }
   }

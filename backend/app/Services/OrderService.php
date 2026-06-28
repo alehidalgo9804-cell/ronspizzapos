@@ -736,8 +736,20 @@ public function update(int $orderId, array $payload, int $usuarioId, int $sucurs
         return;
     }
 
-    $shipping = (float) ($payload['envio_total'] ?? 0);
-    $bonus = (float) ($payload['bono_repartidor'] ?? 10);
+    $orderStmt = $db->prepare('SELECT envio_total FROM pedidos WHERE id = :id LIMIT 1');
+    $orderStmt->execute(['id' => $orderId]);
+    $orderRow = $orderStmt->fetch(PDO::FETCH_ASSOC);
+
+    $existingStmt = $db->prepare('SELECT costo_envio, bono_repartidor FROM entregas WHERE pedido_id = :pedido_id LIMIT 1');
+    $existingStmt->execute(['pedido_id' => $orderId]);
+    $existingDelivery = $existingStmt->fetch(PDO::FETCH_ASSOC);
+
+    $shipping = isset($payload['envio_total'])
+        ? (float) $payload['envio_total']
+        : (float) ($existingDelivery['costo_envio'] ?? ($orderRow['envio_total'] ?? 0));
+    $bonus = isset($payload['bono_repartidor'])
+        ? (float) $payload['bono_repartidor']
+        : (float) ($existingDelivery['bono_repartidor'] ?? 10);
     $driverId = isset($payload['repartidor_id']) && (int) $payload['repartidor_id'] > 0
         ? (int) $payload['repartidor_id']
         : null;

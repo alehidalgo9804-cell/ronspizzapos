@@ -319,9 +319,11 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
       final key = '${map['key'] ?? ''}'.toLowerCase();
       final label = key == 'delivery'
           ? 'Domicilio'
-          : key == 'pickup'
+          : key == 'pickup' || key == 'recoger'
               ? 'Recoger'
-              : 'Mesa / Para comer aqui';
+              : key == 'mesa' || key == 'comedor' || key.isEmpty
+                  ? 'Mesa / Para comer aqui'
+                  : key[0].toUpperCase() + key.substring(1);
       byType.add(<String, dynamic>{
         'label': label,
         'orders': _toInt(map['orders']),
@@ -350,10 +352,21 @@ class _PosSalesReportDialogState extends State<_PosSalesReportDialog> {
     final deliverySales = byType
         .where((row) => row['label'] == 'Domicilio')
         .fold<double>(0, (acc, row) => acc + _toDouble(row['total']));
-    final deliveryShipping = await _sumDeliveryShippingFromDetails(deliveryRows);
-    const bonusPerDelivery = 10.0;
+
+    // El backend ahora reporta el envío y bono desde la tabla de entregas.
+    double deliveryShipping = _toDouble(summary['delivery_shipping']);
+    double deliveryBonusTotal = _toDouble(summary['delivery_bonus']);
     final deliveryDeliveryCount = deliveryRows.length;
-    final deliveryBonusTotal = deliveryDeliveryCount * bonusPerDelivery;
+
+    // Fallback: si el backend no devuelve los nuevos campos, calcular localmente.
+    if (deliveryShipping <= 0 && deliveryRows.isNotEmpty) {
+      deliveryShipping = await _sumDeliveryShippingFromDetails(deliveryRows);
+    }
+    if (deliveryBonusTotal <= 0 && deliveryDeliveryCount > 0) {
+      const bonusPerDelivery = 10.0;
+      deliveryBonusTotal = deliveryDeliveryCount * bonusPerDelivery;
+    }
+
     final deliveryDriverShare = deliveryShipping + deliveryBonusTotal;
     final deliveryPizzeriaShare = deliverySales;
 
